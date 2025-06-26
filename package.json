@@ -4,7 +4,8 @@
   "description": "SportStream Pro application with Cloudflare Pages Functions",
   "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "echo \"No frontend build step required, skipping...\""
   },
   "dependencies": {
     "@google/genai": "^1.7.0",
