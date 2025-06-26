@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../AppContext';
 import MatchList from '../components/matches/MatchList';
@@ -20,20 +21,28 @@ const HomePage: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
+  const todayStart = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Set to the beginning of the current day
+    return today;
+  }, []); // Recalculates only if component remounts, or could depend on a date-change trigger
+
   const featuredMatches = useMemo(() => {
     return matches
       .filter(match => match.isFeatured)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // Optional: sort featured matches
-  }, [matches]);
+      .filter(match => new Date(match.date) >= todayStart) // Filter out past matches
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [matches, todayStart]);
 
   const regularMatches = useMemo(() => {
     return matches
       // Optionally, filter out featured matches from the main list if you don't want duplication:
       // .filter(match => !match.isFeatured) 
+      .filter(match => new Date(match.date) >= todayStart) // Filter out past matches
       .filter(match => selectedLeague ? match.leagueName === selectedLeague : true)
       .filter(match => selectedStatus ? match.status === selectedStatus : true)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [matches, selectedLeague, selectedStatus]);
+  }, [matches, selectedLeague, selectedStatus, todayStart]);
 
   const leagueOptions = [{ value: '', label: 'All Leagues' }, ...leagues.map(l => ({ value: l, label: l }))];
   const statusOptions = [

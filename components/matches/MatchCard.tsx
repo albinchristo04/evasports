@@ -1,9 +1,11 @@
+
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Match, MatchStatus } from '../../types';
 import { formatDate } from '../../utils/helpers';
 import { PlayCircleIcon } from '../icons';
-import CountdownTimer from '../common/CountdownTimer'; // Import CountdownTimer
+import CountdownTimer from '../common/CountdownTimer'; 
+import { generateMatchPath } from '../../utils/slugify'; // Import slug generation utility
 
 interface MatchCardProps {
   match: Match;
@@ -22,6 +24,8 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
   const hasStreams = match.streamLinks && match.streamLinks.length > 0;
   const isUpcomingAndFuture = match.status === MatchStatus.UPCOMING && new Date(match.date) > new Date();
 
+  // Generate SEO-friendly path
+  const matchPath = generateMatchPath(match.leagueName, match.team1.name, match.team2.name, match.id);
 
   return (
     <div className="bg-gray-800 rounded-xl shadow-2xl overflow-hidden transition-all duration-300 hover:shadow-[var(--theme-accent)]/30 hover:scale-[1.02]">
@@ -61,11 +65,8 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
         {match.group && <p className="text-xs text-gray-500 text-center mb-1">Group: {match.group}</p>}
 
         <Link
-          to={`/match/${match.id}`}
+          to={matchPath} // Use the new SEO-friendly path
           className={`w-full flex items-center justify-center mt-4 px-4 py-2.5 text-neutral-dark font-semibold rounded-lg hover:opacity-90 transition-colors duration-200 ${hasStreams ? 'bg-[var(--theme-accent)]' : 'bg-gray-600'}`}
-          // For non-streamable matches, it's still a link to details
-          // aria-disabled={!hasStreams} 
-          // onClick={(e) => { if (!hasStreams) e.preventDefault(); }} 
         >
           <PlayCircleIcon className="h-5 w-5 mr-2" />
           {hasStreams ? 'Match Details & Stream' : 'Match Details'}

@@ -1,23 +1,17 @@
 {
   "name": "sportstream-pro",
+  "version": "1.0.0",
+  "description": "SportStream Pro application with Cloudflare Pages Functions",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "react-router-dom": "^7.6.2",
-    "uuid": "^11.1.0",
-    "@google/genai": "^1.7.0"
+    "@google/genai": "^1.7.0",
+    "web-push": "^3.6.0"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
-    "typescript": "~5.7.2",
-    "vite": "^6.2.0"
+    "@cloudflare/workers-types": "^4.20240403.0",
+    "typescript": "^5.0.0"
   }
 }

@@ -1,10 +1,11 @@
+
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Match, JsonSource, AdminSettings, RawMatchData, PartialAdminSettings, MatchStatus, ManagedTeam, TeamContextType, Team as AppTeam, AdSlot, AdLocationKey, PartialAdSlotsSettings, PartialFeaturedMatchesSettings, AppNotification } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { INITIAL_ADMIN_SETTINGS } from './constants';
 import { parseMatchesFromJson, generateId } from './utils/helpers';
 import { normalizeNameForKey, guessLogoUrl } from './utils/logoService'; 
-// Removed: import { GoogleGenAI } from "@google/genai"; 
+import { registerServiceWorker, askNotificationPermission, subscribeUserToPush, sendSubscriptionToBackend } from './utils/pushService';
 
 
 interface AppContextTypeCore {
@@ -34,10 +35,11 @@ interface AppContextTypeCore {
   toggleFeaturedMatch: (matchId: string) => void;
   // Match Subscriptions & Notifications
   subscribedMatchIds: string[];
-  toggleMatchSubscription: (matchId: string) => void;
+  toggleMatchSubscription: (matchId: string, matchName?: string) => void; // Added matchName for better notifications
   isMatchSubscribed: (matchId: string) => boolean;
   activeAppNotifications: AppNotification[];
   dismissAppNotification: (notificationId: string) => void;
+  incrementMatchViewCount: (matchId: string) => void; 
   // New function for Gemini API via backend
   generateTextWithGemini: (prompt: string) => Promise<string>;
 }
@@ -207,6 +209,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [processTeamForLogoDisplay, featuredMatchIds]);
 
+  const updateMatch = useCallback((updatedMatch: Match) => {
+    const isNowFeatured = !!updatedMatch.isFeatured;
+    const wasFeatured = featuredMatchIds.includes(updatedMatch.id);
+
+    if (isNowFeatured && !wasFeatured) {
+        updateAdminSettings({ featuredMatchIds: [...featuredMatchIds, updatedMatch.id] });
+    } else if (!isNowFeatured && wasFeatured) {
+        updateAdminSettings({ featuredMatchIds: featuredMatchIds.filter(id => id !== updatedMatch.id) });
+    }
+    setMatches(prev => processMatchArrays(prev.map(m => m.id === updatedMatch.id ? { ...updatedMatch, isFeatured: isNowFeatured } : m)));
+  },[featuredMatchIds, processMatchArrays, updateAdminSettings, setMatches]);
+
   const fetchMatchesFromSource = useCallback(async (source: JsonSource) => {
     setLoadingSources(prev => ({ ...prev, [source.id]: true }));
     setError(null);
@@ -297,6 +311,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...matchData, 
         id: newMatchId,
         isFeatured: !!matchData.isFeatured, 
+        viewCount: 0, 
     };
     
     if (newMatch.isFeatured) {
@@ -307,17 +322,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setMatches(prev => processMatchArrays([newMatch, ...prev]));
   }, [featuredMatchIds, processMatchArrays, updateAdminSettings, setMatches]);
 
-  const updateMatch = useCallback((updatedMatch: Match) => {
-    const isNowFeatured = !!updatedMatch.isFeatured;
-    const wasFeatured = featuredMatchIds.includes(updatedMatch.id);
-
-    if (isNowFeatured && !wasFeatured) {
-        updateAdminSettings({ featuredMatchIds: [...featuredMatchIds, updatedMatch.id] });
-    } else if (!isNowFeatured && wasFeatured) {
-        updateAdminSettings({ featuredMatchIds: featuredMatchIds.filter(id => id !== updatedMatch.id) });
-    }
-    setMatches(prev => processMatchArrays(prev.map(m => m.id === updatedMatch.id ? { ...updatedMatch, isFeatured: isNowFeatured } : m)));
-  },[featuredMatchIds, processMatchArrays, updateAdminSettings, setMatches]);
 
   const deleteMatch = (matchId: string) => {
     setMatches(prevMatches => prevMatches.filter(m => m.id !== matchId));
@@ -364,6 +368,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return undefined;
   }, [matches, processTeamForLogoDisplay, featuredMatchIds]);
   
+  const incrementMatchViewCount = useCallback((matchId: string) => {
+    const match = matches.find(m => m.id === matchId);
+    if (match) {
+      const newViewCount = (match.viewCount || 0) + 1;
+      updateMatch({ ...match, viewCount: newViewCount });
+    }
+  }, [matches, updateMatch]);
+
   const toggleFeaturedMatch = useCallback((matchId: string) => {
     const newFeaturedIds = featuredMatchIds.includes(matchId)
       ? featuredMatchIds.filter(id => id !== matchId)
@@ -415,18 +427,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   }, [setAdminSettingsState]);
 
-
-  // Match Subscription and In-App Notification Logic
-  const toggleMatchSubscription = useCallback((matchId: string) => {
-    setSubscribedMatchIds(prev =>
-      prev.includes(matchId) ? prev.filter(id => id !== matchId) : [...prev, matchId]
-    );
-  }, [setSubscribedMatchIds]);
-
-  const isMatchSubscribed = useCallback((matchId: string): boolean => {
-    return subscribedMatchIds.includes(matchId);
-  }, [subscribedMatchIds]);
-
   const addAppNotification = useCallback((message: string, type: AppNotification['type'] = 'info', matchId?: string, notificationType?: AppNotification['notificationType']) => {
     const newNotification: AppNotification = {
       id: generateId(),
@@ -439,8 +439,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveAppNotifications(prev => [newNotification, ...prev.slice(0, 4)]); // Keep max 5 notifications
   }, []);
 
+  // Match Subscription and Push Notification Logic
+  const toggleMatchSubscription = useCallback(async (matchId: string, matchName?: string) => {
+    const isCurrentlySubscribed = subscribedMatchIds.includes(matchId);
+    
+    setSubscribedMatchIds(prev =>
+      isCurrentlySubscribed ? prev.filter(id => id !== matchId) : [...prev, matchId]
+    );
+
+    // If subscribing for the first time (not just in-app, but to push)
+    if (!isCurrentlySubscribed) {
+        addAppNotification(`Subscribed to ${matchName || 'match'} alerts.`, 'info', matchId);
+        try {
+            if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+                addAppNotification('Browser push notifications are not supported.', 'warning', matchId);
+                return;
+            }
+
+            let permission = Notification.permission;
+            if (permission === 'default') {
+                addAppNotification('Requesting notification permission...', 'info', matchId);
+                permission = await askNotificationPermission();
+            }
+
+            if (permission === 'granted') {
+                addAppNotification('Subscribing to push notifications...', 'info', matchId);
+                const subscription = await subscribeUserToPush();
+                if (subscription) {
+                    await sendSubscriptionToBackend(subscription, matchId);
+                    addAppNotification(`Successfully subscribed to push notifications for ${matchName || 'this match'}!`, 'success', matchId);
+                } else {
+                    addAppNotification('Failed to subscribe to push notifications. Already subscribed or an error occurred.', 'warning', matchId);
+                }
+            } else if (permission === 'denied') {
+                addAppNotification('Notification permission denied. Please enable in browser settings.', 'warning', matchId);
+            }
+        } catch (error: any) {
+            console.error('Error during push subscription process:', error);
+            addAppNotification(`Error subscribing to push: ${error.message}`, 'error', matchId);
+        }
+    } else {
+      // Logic for unsubscribing from push notifications (to be implemented later)
+      // For now, just remove from in-app list.
+      addAppNotification(`Unsubscribed from ${matchName || 'match'} alerts.`, 'info', matchId);
+      // Example: await unsubscribeUserFromPush(matchId); // (from pushService.ts, needs implementation)
+    }
+  }, [subscribedMatchIds, setSubscribedMatchIds, addAppNotification]);
+
+  const isMatchSubscribed = useCallback((matchId: string): boolean => {
+    return subscribedMatchIds.includes(matchId);
+  }, [subscribedMatchIds]);
+
+
   const dismissAppNotification = useCallback((notificationId: string) => {
     setActiveAppNotifications(prev => prev.filter(n => n.id !== notificationId));
+  }, []);
+  
+  // Register SW on initial load
+  useEffect(() => {
+    registerServiceWorker();
   }, []);
 
   useEffect(() => {
@@ -525,7 +582,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isMatchSubscribed,
       activeAppNotifications,
       dismissAppNotification,
-      generateTextWithGemini, // Expose the new function
+      incrementMatchViewCount, 
+      generateTextWithGemini, 
     }}>
       {children}
     </AppContext.Provider>

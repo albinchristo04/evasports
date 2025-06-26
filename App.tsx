@@ -10,7 +10,8 @@ import AdminMatchesPage from './pages/admin/AdminMatchesPage';
 import AdminSettingsPage from './pages/admin/AdminSettingsPage';
 import AdminMatchFormPage from './pages/admin/AdminMatchFormPage';
 import AdminTeamsPage from './pages/admin/AdminTeamsPage'; 
-import AdminImportInteractivePage from './pages/admin/AdminImportInteractivePage'; // New Import
+import AdminImportInteractivePage from './pages/admin/AdminImportInteractivePage';
+import AdminImportTxtPage from './pages/admin/AdminImportTxtPage'; 
 
 const App: React.FC = () => {
   return (
@@ -18,7 +19,8 @@ const App: React.FC = () => {
       <Routes>
         <Route path="/" element={<MainLayout />}>
           <Route index element={<HomePage />} />
-          <Route path="match/:matchId" element={<MatchDetailPage />} />
+          {/* Updated Match Detail Page Route */}
+          <Route path="match/:leagueSlug/:teamsSlug/:matchId" element={<MatchDetailPage />} />
         </Route>        
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="dashboard" replace />} />
@@ -27,7 +29,8 @@ const App: React.FC = () => {
           <Route path="matches/new" element={<AdminMatchFormPage />} />
           <Route path="matches/edit/:matchId" element={<AdminMatchFormPage />} />
           <Route path="teams" element={<AdminTeamsPage />} />
-          <Route path="import" element={<AdminImportInteractivePage />} /> {/* New Route */}
+          <Route path="import" element={<AdminImportInteractivePage />} />
+          <Route path="import-txt" element={<AdminImportTxtPage />} /> 
           <Route path="settings" element={<AdminSettingsPage />} />
         </Route>
       </Routes>

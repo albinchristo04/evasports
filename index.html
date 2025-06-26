@@ -42,5 +42,23 @@
 <body class="bg-neutral-darker">
   <div id="root"></div>
   <script type="module" src="/index.tsx"></script>
+  <script>
+    // Register Service Worker
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        // Construct an absolute URL for sw.js based on the current window's origin
+        const swUrl = `${window.location.origin}/sw.js`;
+        navigator.serviceWorker.register(swUrl)
+          .then(registration => {
+            console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            console.log('Registered SW from URL:', swUrl);
+          })
+          .catch(error => {
+            console.log('ServiceWorker registration failed: ', error);
+            console.log('Attempted to register SW from URL:', swUrl);
+          });
+      });
+    }
+  </script>
 </body>
 </html>

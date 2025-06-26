@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { ChartBarIcon, ListBulletIcon, Cog6ToothIcon, PlayCircleIcon, HomeIcon, UserGroupIcon, CloudArrowDownIcon } from '../icons'; // Added CloudArrowDownIcon
+import { ChartBarIcon, ListBulletIcon, Cog6ToothIcon, PlayCircleIcon, HomeIcon, UserGroupIcon, CloudArrowDownIcon, DocumentArrowDownIcon } from '../icons'; // Added DocumentArrowDownIcon
 import { useAppContext } from '../../AppContext';
 
 const AdminSidebar: React.FC = () => {
@@ -40,11 +40,18 @@ const AdminSidebar: React.FC = () => {
           <span>Matches</span>
         </NavLink>
         <NavLink
-          to="import" // Link to Interactive Import
+          to="import" 
           className={({ isActive }) => `${commonLinkClasses} ${isActive ? activeLinkClasses : inactiveLinkClasses}`}
         >
           <CloudArrowDownIcon className="h-6 w-6" />
-          <span>Import Matches</span>
+          <span>Import JSON</span>
+        </NavLink>
+        <NavLink
+          to="import-txt" // Link to TXT Import
+          className={({ isActive }) => `${commonLinkClasses} ${isActive ? activeLinkClasses : inactiveLinkClasses}`}
+        >
+          <DocumentArrowDownIcon className="h-6 w-6" />
+          <span>Import TXT File</span>
         </NavLink>
         <NavLink
           to="teams" 

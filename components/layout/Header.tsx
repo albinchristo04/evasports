@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { PlayCircleIcon } from '../icons';
@@ -27,6 +28,8 @@ const Header: React.FC = () => {
             >
               Home
             </NavLink>
+            {/* Admin Panel link removed from public header */}
+            {/* 
             <NavLink 
               to="/admin" 
               className={({ isActive }) => 
@@ -35,6 +38,7 @@ const Header: React.FC = () => {
             >
               Admin Panel
             </NavLink>
+            */}
           </nav>
         </div>
       </div>

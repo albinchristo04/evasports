@@ -1,32 +1,48 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+
+import React, { useEffect, useState, useCallback } from 'react';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { useAppContext } from '../AppContext';
 import { Match, MatchStatus, StreamLink, AdLocationKey } from '../types';
 import Spinner from '../components/common/Spinner';
 import VideoPlayer from '../components/matches/VideoPlayer';
 import { formatDate } from '../utils/helpers';
-import { PlayCircleIcon } from '../components/icons';
+import { PlayCircleIcon, HeartIcon, OutlineHeartIcon, TelegramIcon, WhatsAppIcon, FacebookIcon, TwitterIcon, EyeIcon } from '../components/icons';
 import Button from '../components/common/Button';
 import AdDisplay from '../components/common/AdDisplay';
+import { generateMatchPath } from '../utils/slugify'; // For canonical URL and share
 
 const MatchDetailPage: React.FC = () => {
-  const { matchId } = useParams<{ matchId: string }>();
-  const { getMatchById, matches, adminSettings } = useAppContext();
+  const { leagueSlug, teamsSlug, matchId } = useParams<{ leagueSlug: string; teamsSlug: string; matchId: string }>();
+  const location = useLocation(); 
+
+  const { 
+    getMatchById, 
+    adminSettings,
+    toggleMatchSubscription,
+    isMatchSubscribed,
+    incrementMatchViewCount // Added
+  } = useAppContext();
+  
   const [match, setMatch] = useState<Match | null | undefined>(null);
   const [selectedStream, setSelectedStream] = useState<StreamLink | null>(null);
-
+  
   useEffect(() => {
     if (matchId) {
-      const foundMatch = getMatchById(matchId);
-      setMatch(foundMatch);
-      if (foundMatch && foundMatch.streamLinks && foundMatch.streamLinks.length > 0) {
-        const activeStream = foundMatch.streamLinks.find(sl => sl.status === 'Active');
-        setSelectedStream(activeStream || foundMatch.streamLinks[0]);
+      const currentMatchData = getMatchById(matchId); 
+      setMatch(currentMatchData);
+
+      if (currentMatchData) {
+        incrementMatchViewCount(matchId); // Increment view count
+      }
+
+      if (currentMatchData && currentMatchData.streamLinks && currentMatchData.streamLinks.length > 0) {
+        const activeStream = currentMatchData.streamLinks.find(sl => sl.status === 'Active');
+        setSelectedStream(activeStream || currentMatchData.streamLinks[0]);
       } else {
         setSelectedStream(null);
       }
     }
-  }, [matchId, getMatchById, matches]);
+  }, [matchId, getMatchById, incrementMatchViewCount]); // Added incrementMatchViewCount
 
   useEffect(() => {
     if (match) {
@@ -65,16 +81,58 @@ const MatchDetailPage: React.FC = () => {
       }
       ogImage.setAttribute('content', adminSettings.seoOpenGraphImageUrl || (match.team1.logoUrl || match.team2.logoUrl || ''));
 
+      let canonicalLink = document.querySelector('link[rel="canonical"]');
+      if (!canonicalLink) {
+        canonicalLink = document.createElement('link');
+        canonicalLink.setAttribute('rel', 'canonical');
+        document.head.appendChild(canonicalLink);
+      }
+      const matchPath = generateMatchPath(match.leagueName, match.team1.name, match.team2.name, match.id);
+      canonicalLink.setAttribute('href', `${window.location.origin}${window.location.pathname.substring(0, window.location.pathname.indexOf('#') + 1)}${matchPath}`);
+
     } else if (match === null && matchId) {
         document.title = `Match Not Found | ${adminSettings.seoMetaTitleSuffix || adminSettings.siteName}`;
     }
-  }, [match, adminSettings, matchId]);
+  }, [match, adminSettings, matchId, location.pathname]);
 
-  if (match === undefined) {
+  const handleSocialShare = (platform: 'telegram' | 'whatsapp' | 'facebook' | 'twitter') => {
+    if (!match || !matchId) return;
+
+    const matchPath = generateMatchPath(match.leagueName, match.team1.name, match.team2.name, matchId);
+    const baseHashPath = window.location.pathname.substring(0, window.location.pathname.indexOf('#') +1);
+    const pageUrl = `${window.location.origin}${baseHashPath}${matchPath}`;
+
+    const matchTitle = `${match.team1.name} vs ${match.team2.name} - ${match.leagueName} on ${adminSettings.siteName}`;
+    const shareText = `Check out the match: ${match.team1.name} vs ${match.team2.name}! Score: ${match.score1 ?? '-'}-${match.score2 ?? '-'}. Details and stream on ${adminSettings.siteName}.`;
+    
+    let url = '';
+
+    switch (platform) {
+      case 'telegram':
+        url = `https://t.me/share/url?url=${encodeURIComponent(pageUrl)}&text=${encodeURIComponent(shareText)}`;
+        break;
+      case 'whatsapp':
+        url = `https://wa.me/?text=${encodeURIComponent(shareText + ' ' + pageUrl)}`;
+        break;
+      case 'facebook':
+        url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(pageUrl)}`;
+        break;
+      case 'twitter':
+        url = `https://twitter.com/intent/tweet?url=${encodeURIComponent(pageUrl)}&text=${encodeURIComponent(matchTitle)}`;
+        break;
+    }
+
+    if (url) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+
+  if (match === undefined) { 
     return <div className="flex justify-center items-center h-64"><Spinner size="lg" /></div>;
   }
 
-  if (!match) {
+  if (!match) { 
     return (
       <div className="text-center py-10">
         <h2 className="text-2xl font-semibold text-red-400 mb-4">Match Not Found</h2>
@@ -86,7 +144,8 @@ const MatchDetailPage: React.FC = () => {
     );
   }
 
-  const { team1, team2, score1, score2, status, date, time, leagueName, round, group, streamLinks } = match;
+  const { team1, team2, score1, score2, status, date, time, leagueName, round, group, streamLinks, viewCount } = match;
+  const subscribed = isMatchSubscribed(match.id);
 
   return (
     <div className="space-y-8">
@@ -98,7 +157,7 @@ const MatchDetailPage: React.FC = () => {
           <p className="text-md text-gray-500">{formatDate(date, true)} {time ? `(${time})` : ''}</p>
         </header>
 
-        <div className="flex flex-col md:flex-row items-center justify-around mb-8 p-6 bg-gray-700 rounded-lg">
+        <div className="flex flex-col md:flex-row items-center justify-around mb-6 p-6 bg-gray-700 rounded-lg">
           <div className="flex flex-col items-center text-center md:w-2/5 mb-4 md:mb-0">
             {team1.logoUrl && <img src={team1.logoUrl} alt={team1.name} className="h-16 w-16 md:h-24 md:w-24 mx-auto mb-3 object-contain" onError={(e) => e.currentTarget.style.display = 'none'}/>}
             <h2 className="text-2xl md:text-3xl font-semibold text-neutral-text truncate" title={team1.name}>{team1.name}</h2>
@@ -112,7 +171,7 @@ const MatchDetailPage: React.FC = () => {
           </div>
         </div>
         
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
             <span className={`px-4 py-2 text-sm font-bold rounded-full ${
                 status === MatchStatus.LIVE ? 'bg-red-600 text-white animate-pulse' : 
                 status === MatchStatus.UPCOMING ? 'bg-yellow-500 text-gray-900' : 
@@ -120,6 +179,57 @@ const MatchDetailPage: React.FC = () => {
             }`}>
                 Status: {status}
             </span>
+        </div>
+
+        <div className="flex items-center justify-center space-x-3 md:space-x-4 mb-8 text-neutral-text">
+            {/* View Count Display */}
+            <div className="flex items-center text-gray-400" title="Match Views">
+              <EyeIcon className="h-5 w-5 mr-1.5" />
+              <span>{viewCount || 0}</span>
+            </div>
+
+            <button 
+                onClick={() => toggleMatchSubscription(match.id, `${match.team1.name} vs ${match.team2.name}`)}
+                title={subscribed ? "Unsubscribe from notifications" : "Subscribe to notifications"}
+                className={`p-2.5 rounded-full hover:bg-gray-700 transition-colors ${subscribed ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}`}
+                aria-pressed={subscribed}
+            >
+                {subscribed ? <HeartIcon className="h-6 w-6"/> : <OutlineHeartIcon className="h-6 w-6"/>}
+                <span className="sr-only">{subscribed ? "Unsubscribe" : "Subscribe"}</span>
+            </button>
+
+            <button 
+                onClick={() => handleSocialShare('telegram')}
+                title="Share on Telegram"
+                className="p-2.5 rounded-full text-sky-400 hover:text-sky-300 hover:bg-gray-700 transition-colors"
+                aria-label="Share on Telegram"
+            >
+                <TelegramIcon className="h-6 w-6"/>
+            </button>
+            <button 
+                onClick={() => handleSocialShare('whatsapp')}
+                title="Share on WhatsApp"
+                className="p-2.5 rounded-full text-green-500 hover:text-green-400 hover:bg-gray-700 transition-colors"
+                aria-label="Share on WhatsApp"
+            >
+                <WhatsAppIcon className="h-6 w-6"/>
+            </button>
+            <button 
+                onClick={() => handleSocialShare('facebook')}
+                title="Share on Facebook"
+                className="p-2.5 rounded-full text-blue-600 hover:text-blue-500 hover:bg-gray-700 transition-colors"
+                aria-label="Share on Facebook"
+            >
+                <FacebookIcon className="h-6 w-6"/>
+            </button>
+            <button 
+                onClick={() => handleSocialShare('twitter')}
+                title="Share on Twitter/X"
+                className="p-2.5 rounded-full text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+                aria-label="Share on Twitter"
+            >
+                <TwitterIcon className="h-6 w-6"/>
+            </button>
         </div>
 
         {streamLinks && streamLinks.length > 0 ? (

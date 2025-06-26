@@ -40,7 +40,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       });
     }
 
-    const body = await request.json<GeminiRequestBody>();
+    const body = await request.json() as GeminiRequestBody;
     const prompt = body.prompt;
 
     if (!prompt) {
