@@ -28,23 +28,33 @@ const StreamLinkModal: React.FC<StreamLinkModalProps> = ({ isOpen, onClose, onSa
   );
 
   useEffect(() => {
-    setCurrentLink(
-      initialStreamLink || {
-        id: initialStreamLink?.id || generateId(), // keep id if editing
+    if (initialStreamLink) {
+      setCurrentLink(initialStreamLink);
+    } else {
+      setCurrentLink({
+        id: generateId(),
         url: '',
         qualityLabel: 'Main',
         type: StreamType.NONE,
         status: StreamLinkStatus.UNKNOWN,
-      }
-    );
+      });
+    }
   }, [initialStreamLink, isOpen]);
-
 
   if (!isOpen) return null;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setCurrentLink(prev => ({ ...prev, [name]: value }));
+    setCurrentLink(prev => {
+      // Convert select values back to enum types
+      if (name === "type") {
+        return { ...prev, type: value as StreamType };
+      }
+      if (name === "status") {
+        return { ...prev, status: value as StreamLinkStatus };
+      }
+      return { ...prev, [name]: value };
+    });
   };
 
   const handleSave = () => {
@@ -138,7 +148,9 @@ const AdminMatchFormPage: React.FC = () => {
       const teamField = name.split('.')[1] as keyof Team;
       setMatchData(prev => ({ ...prev, team2: { ...prev.team2, [teamField]: value } }));
     } else if (name === 'score1' || name === 'score2') {
-        setMatchData(prev => ({ ...prev, [name]: value === '' ? null : parseInt(value, 10) }));
+      setMatchData(prev => ({ ...prev, [name]: value === '' ? null : parseInt(value, 10) }));
+    } else if (name === 'status') {
+      setMatchData(prev => ({ ...prev, status: value as MatchStatus }));
     } else {
       setMatchData(prev => ({ ...prev, [name]: value }));
     }

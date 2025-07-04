@@ -135,7 +135,7 @@ const AdminImportInteractivePage: React.FC = () => {
     for(const matchFromPreview of matchesToAdd) {
         if (!matchFromPreview.isAlreadyImported && !matchFromPreview.isPermanentlyDeleted) {
             const { id, isAlreadyImported, isPermanentlyDeleted, ...matchDataToAdd } = matchFromPreview;
-            await addMatch(matchDataToAdd);
+            await addMatch(matchDataToAdd); // <-- This is correct, as it omits id
             addedCount++;
         } else {
             skippedCount++;
