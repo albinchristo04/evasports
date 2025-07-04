@@ -27,14 +27,7 @@ const Header: React.FC = () => {
             >
               Home
             </NavLink>
-            <NavLink 
-              to="/admin" 
-              className={({ isActive }) => 
-                `text-lg font-medium hover:text-[var(--theme-accent)] transition-colors ${isActive ? 'text-[var(--theme-accent)]' : 'text-neutral-text'}`
-               }
-            >
-              Admin Panel
-            </NavLink>
+            {/* Removed Admin Panel link */}
           </nav>
         </div>
       </div>
