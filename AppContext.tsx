@@ -1,47 +1,44 @@
-
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { Match, JsonSource, AdminSettings, RawMatchData, PartialAdminSettings, MatchStatus, ManagedTeam, TeamContextType, Team as AppTeam, AdSlot, AdLocationKey, PartialAdSlotsSettings, PartialFeaturedMatchesSettings, AppNotification } from './types';
+import { Json, Database } from './database.types';
+import { Match, JsonSource, AdminSettings, RawMatchData, PartialAdminSettings, MatchStatus, ManagedTeam, TeamContextType, Team as AppTeam, AdSlot, AdLocationKey, PartialAdSlotsSettings, PartialFeaturedMatchesSettings, AppNotification, StreamLink } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { INITIAL_ADMIN_SETTINGS } from './constants';
 import { parseMatchesFromJson, generateId } from './utils/helpers';
 import { normalizeNameForKey, guessLogoUrl } from './utils/logoService'; 
-import { registerServiceWorker, askNotificationPermission, subscribeUserToPush, sendSubscriptionToBackend } from './utils/pushService';
+import { supabase } from './utils/supabase';
 
 
 interface AppContextTypeCore {
   matches: Match[];
   setMatches: React.Dispatch<React.SetStateAction<Match[]>>;
   adminSettings: AdminSettings;
-  updateAdminSettings: (newSettings: PartialAdminSettings | Pick<AdminSettings, 'managedTeams'> | PartialAdSlotsSettings | PartialFeaturedMatchesSettings) => void;
-  setJsonSources: React.Dispatch<React.SetStateAction<JsonSource[]>>; 
+  updateAdminSettings: (newSettings: Partial<AdminSettings>) => Promise<void>;
+  setJsonSources: (updater: React.SetStateAction<JsonSource[]>) => Promise<void>; 
   fetchMatchesFromSource: (source: JsonSource) => Promise<void>;
-  fetchAllMatchesFromSources: () => Promise<void>;
+  fetchAllMatchesFromSources: (overwrite?: boolean) => Promise<{added: number, skipped: number, error?: string}>;
   loadingSources: { [key: string]: boolean }; 
   globalLoading: boolean;
   error: string | null;
-  addMatch: (match: Omit<Match, 'id'>) => void;
-  updateMatch: (match: Match) => void;
-  deleteMatch: (matchId: string) => void;
+  addMatch: (match: Omit<Match, 'id'>) => Promise<void>;
+  updateMatch: (match: Match) => Promise<void>;
+  deleteMatch: (matchId: string) => Promise<void>;
   getMatchById: (matchId: string) => Match | undefined;
   leagues: string[];
-  bulkDeleteMatches: (matchIds: string[]) => void;
-  bulkUpdateMatchStatus: (matchIds: string[], status: MatchStatus) => void;
-  bulkClearStreamLinks: (matchIds: string[]) => void;
+  bulkDeleteMatches: (matchIds: string[]) => Promise<void>;
+  bulkUpdateMatchStatus: (matchIds: string[], status: MatchStatus) => Promise<void>;
+  bulkClearStreamLinks: (matchIds: string[]) => Promise<void>;
   // Ad Management
   getAdSlot: (locationKey: AdLocationKey) => AdSlot | undefined;
-  addOrUpdateAdSlot: (adSlot: AdSlot) => void;
-  deleteAdSlot: (adSlotId: string) => void;
+  addOrUpdateAdSlot: (adSlot: AdSlot) => Promise<void>;
+  deleteAdSlot: (adSlotId: string) => Promise<void>;
   // Featured Matches
-  toggleFeaturedMatch: (matchId: string) => void;
+  toggleFeaturedMatch: (matchId: string) => Promise<void>;
   // Match Subscriptions & Notifications
   subscribedMatchIds: string[];
-  toggleMatchSubscription: (matchId: string, matchName?: string) => void; // Added matchName for better notifications
+  toggleMatchSubscription: (matchId: string) => void;
   isMatchSubscribed: (matchId: string) => boolean;
   activeAppNotifications: AppNotification[];
   dismissAppNotification: (notificationId: string) => void;
-  incrementMatchViewCount: (matchId: string) => void; 
-  // New function for Gemini API via backend
-  generateTextWithGemini: (prompt: string) => Promise<string>;
 }
 
 export type AppContextType = AppContextTypeCore & TeamContextType;
@@ -52,13 +49,13 @@ const NOTIFICATION_CHECK_INTERVAL = 30 * 1000; // 30 seconds
 const MINUTES_BEFORE_START_FOR_NOTIFICATION = 15;
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [matches, setMatches] = useLocalStorage<Match[]>('sportstream_matches', []);
-  const [adminSettings, setAdminSettingsState] = useLocalStorage<AdminSettings>('sportstream_adminSettings', INITIAL_ADMIN_SETTINGS);
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [adminSettings, setAdminSettingsState] = useState<AdminSettings>(INITIAL_ADMIN_SETTINGS);
   const [subscribedMatchIds, setSubscribedMatchIds] = useLocalStorage<string[]>('sportstream_subscribedMatchIds', []);
   const [activeAppNotifications, setActiveAppNotifications] = useState<AppNotification[]>([]);
   
   const [loadingSources, setLoadingSources] = useState<{ [key: string]: boolean }>({});
-  const [globalLoading, setGlobalLoading] = useState<boolean>(false);
+  const [globalLoading, setGlobalLoading] = useState<boolean>(true); // Start with loading true
   const [error, setError] = useState<string | null>(null);
 
   const jsonSources = adminSettings.jsonSources;
@@ -69,44 +66,78 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const notifiedStartingSoonRef = useRef<Set<string>>(new Set());
   const notifiedLiveRef = useRef<Set<string>>(new Set());
 
-  // Function to call Gemini API via our backend proxy
-  const generateTextWithGemini = useCallback(async (prompt: string): Promise<string> => {
-    try {
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ prompt }),
-      });
+  // Initial data loading from Supabase
+  useEffect(() => {
+    const loadInitialData = async () => {
+      setError(null);
+      setGlobalLoading(true);
 
-      const data = await response.json();
+      // Fetch settings
+      const { data: settingsData, error: settingsError } = await supabase
+        .from('settings')
+        .select('settings_data')
+        .eq('id', 1)
+        .single();
 
-      if (!response.ok) {
-        throw new Error(data.error || `API request failed with status: ${response.status}`);
+      if (settingsError && settingsError.code !== 'PGRST116') { // PGRST116 = no rows found
+        console.error("Error fetching settings:", settingsError);
+        setError(`Error fetching settings: ${settingsError.message}`);
+      } else if (settingsData) {
+        const dbSettings = settingsData.settings_data as Partial<AdminSettings>;
+        setAdminSettingsState(prev => ({...prev, ...dbSettings}));
+      } else { // No settings found, insert initial settings
+        const { error: upsertError } = await supabase.from('settings').upsert([{ id: 1, settings_data: INITIAL_ADMIN_SETTINGS as unknown as Json }]);
+        if(upsertError) {
+            console.error("Error saving initial settings:", upsertError);
+            setError(`Error saving initial settings: ${upsertError.message}`);
+        }
       }
-      return data.text || '';
-    } catch (err: any) {
-      console.error('Error calling Gemini API proxy:', err);
-      throw new Error(`Failed to generate text: ${err.message}`);
-    }
+
+      // Fetch matches
+      const { data: matchesData, error: matchesError } = await supabase
+        .from('matches')
+        .select('*')
+        .order('date', { ascending: false });
+
+      if (matchesError) {
+        console.error("Error fetching matches:", matchesError);
+        setError(`Error fetching matches: ${matchesError.message}`);
+      } else if (matchesData) {
+        setMatches(matchesData as Match[]);
+      }
+      setGlobalLoading(false);
+    };
+
+    loadInitialData();
   }, []);
 
+  const updateAdminSettings = useCallback(async (newSettings: Partial<AdminSettings>) => {
+    const currentState = adminSettings;
+    const updatedSettingsData = {
+        ...currentState,
+        ...newSettings,
+    } as AdminSettings;
+    
+    // Optimistic UI update
+    setAdminSettingsState(updatedSettingsData);
 
-  const setJsonSources = useCallback((updater: React.SetStateAction<JsonSource[]>) => {
-    setAdminSettingsState(prevSettings => {
-      const newSources = typeof updater === 'function' ? updater(prevSettings.jsonSources) : updater;
-      return { ...prevSettings, jsonSources: newSources };
-    });
-  }, [setAdminSettingsState]);
+    const { error: dbError } = await supabase
+        .from('settings')
+        .update({ settings_data: updatedSettingsData as unknown as Json, updated_at: new Date().toISOString() })
+        .eq('id', 1);
 
-  const updateAdminSettings = useCallback((newSettings: PartialAdminSettings | Pick<AdminSettings, 'managedTeams'> | PartialAdSlotsSettings | PartialFeaturedMatchesSettings) => {
-    setAdminSettingsState(prevSettings => ({
-      ...prevSettings,
-      ...newSettings,
-    }));
-  }, [setAdminSettingsState]);
+    if (dbError) {
+        console.error("Error updating settings:", dbError);
+        setError(`Failed to save settings: ${dbError.message}`);
+        // Revert optimistic update on failure
+        setAdminSettingsState(currentState);
+    }
+  }, [adminSettings]);
 
+  const setJsonSources = useCallback(async (updater: React.SetStateAction<JsonSource[]>) => {
+    const newSources = typeof updater === 'function' ? updater(adminSettings.jsonSources) : updater;
+    await updateAdminSettings({ jsonSources: newSources });
+  }, [adminSettings.jsonSources, updateAdminSettings]);
 
   const getManagedTeamLogo = useCallback((teamName: string, leagueName?: string): string | undefined => {
     const normalizedTeamKey = normalizeNameForKey(teamName);
@@ -122,6 +153,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return foundByNameOnly?.logoUrl;
   }, [managedTeams]);
 
+  const processMatchArrays = useCallback((matchesArray: Match[]): Match[] => {
+    return matchesArray.map(m => ({
+        ...m,
+        isFeatured: adminSettings.featuredMatchIds.includes(m.id),
+    })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [adminSettings.featuredMatchIds]);
+  
   const processTeamForLogoDisplay = useCallback((team: AppTeam, leagueName: string): AppTeam => {
     let logoUrl = getManagedTeamLogo(team.name, leagueName);
     if (!logoUrl) {
@@ -130,58 +168,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { ...team, logoUrl: logoUrl || undefined }; 
   }, [getManagedTeamLogo]);
 
-  const addOrUpdateManagedTeam = useCallback((teamEntry: ManagedTeam) => {
-    let logoActuallyChanged = false;
-    let newDisplayName: string | undefined = undefined;
+  const addOrUpdateManagedTeam = useCallback(async (teamEntry: ManagedTeam) => {
+    const newManagedTeamsList = [...managedTeams];
+    const existingIndex = newManagedTeamsList.findIndex(mt => mt.nameKey === teamEntry.nameKey);
 
-    setAdminSettingsState(prevSettings => {
-      const existingIndex = prevSettings.managedTeams.findIndex(mt => mt.nameKey === teamEntry.nameKey);
-      let newManagedTeamsList;
-
-      if (existingIndex > -1) {
-        if (prevSettings.managedTeams[existingIndex].logoUrl !== teamEntry.logoUrl || prevSettings.managedTeams[existingIndex].displayName !== teamEntry.displayName) {
-          logoActuallyChanged = prevSettings.managedTeams[existingIndex].logoUrl !== teamEntry.logoUrl;
-          newDisplayName = teamEntry.displayName; 
-        }
-        newManagedTeamsList = [...prevSettings.managedTeams];
-        newManagedTeamsList[existingIndex] = teamEntry;
-      } else {
-        newManagedTeamsList = [...prevSettings.managedTeams, teamEntry];
-        logoActuallyChanged = !!teamEntry.logoUrl; 
-        newDisplayName = teamEntry.displayName;
-      }
-      return { ...prevSettings, managedTeams: newManagedTeamsList.sort((a, b) => a.displayName.localeCompare(b.displayName)) };
-    });
-
-    if (logoActuallyChanged || (newDisplayName && managedTeams.find(mt => mt.nameKey === teamEntry.nameKey)?.displayName !== newDisplayName)) {
-      setMatches(prevMatches =>
-        prevMatches.map(m => {
-          let t1 = m.team1;
-          let t2 = m.team2;
-          let matchUpdated = false;
-
-          if (normalizeNameForKey(m.team1.name) === teamEntry.nameKey) {
-            const currentLogo = getManagedTeamLogo(teamEntry.displayName, m.leagueName); 
-            t1 = { ...m.team1, logoUrl: currentLogo || m.team1.logoUrl, name: newDisplayName || m.team1.name };
-            matchUpdated = true;
-          }
-          if (normalizeNameForKey(m.team2.name) === teamEntry.nameKey) {
-            const currentLogo = getManagedTeamLogo(teamEntry.displayName, m.leagueName);
-            t2 = { ...m.team2, logoUrl: currentLogo || m.team2.logoUrl, name: newDisplayName || m.team2.name };
-            matchUpdated = true;
-          }
-          return matchUpdated ? { ...m, team1: t1, team2: t2 } : m;
-        })
-      );
+    if (existingIndex > -1) {
+      newManagedTeamsList[existingIndex] = teamEntry;
+    } else {
+      newManagedTeamsList.push(teamEntry);
     }
-  }, [setAdminSettingsState, setMatches, getManagedTeamLogo, managedTeams]); 
+    await updateAdminSettings({ managedTeams: newManagedTeamsList.sort((a, b) => a.displayName.localeCompare(b.displayName)) });
+  }, [managedTeams, updateAdminSettings]);
 
-  const deleteManagedTeam = useCallback((teamNameKey: string) => {
-    setAdminSettingsState(prev => ({
-      ...prev,
-      managedTeams: prev.managedTeams.filter(mt => mt.nameKey !== teamNameKey),
-    }));
-  }, [setAdminSettingsState]);
+  const deleteManagedTeam = useCallback(async (teamNameKey: string) => {
+    const newManagedTeams = managedTeams.filter(mt => mt.nameKey !== teamNameKey);
+    await updateAdminSettings({ managedTeams: newManagedTeams });
+  }, [managedTeams, updateAdminSettings]);
   
   const allDiscoveredTeamNames = React.useMemo(() => {
     const teams = new Map<string, {name: string, league: string}>();
@@ -199,160 +201,129 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const leagueSet = new Set(matches.map(match => match.leagueName));
     return Array.from(leagueSet).sort();
   }, [matches]);
-
-  const processMatchArrays = useCallback((matchesArray: Match[]): Match[] => {
-    return matchesArray.map(m => ({
-        ...m,
-        team1: processTeamForLogoDisplay(m.team1, m.leagueName),
-        team2: processTeamForLogoDisplay(m.team2, m.leagueName),
-        isFeatured: featuredMatchIds.includes(m.id),
-    })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [processTeamForLogoDisplay, featuredMatchIds]);
-
-  const updateMatch = useCallback((updatedMatch: Match) => {
-    const isNowFeatured = !!updatedMatch.isFeatured;
-    const wasFeatured = featuredMatchIds.includes(updatedMatch.id);
-
-    if (isNowFeatured && !wasFeatured) {
-        updateAdminSettings({ featuredMatchIds: [...featuredMatchIds, updatedMatch.id] });
-    } else if (!isNowFeatured && wasFeatured) {
-        updateAdminSettings({ featuredMatchIds: featuredMatchIds.filter(id => id !== updatedMatch.id) });
-    }
-    setMatches(prev => processMatchArrays(prev.map(m => m.id === updatedMatch.id ? { ...updatedMatch, isFeatured: isNowFeatured } : m)));
-  },[featuredMatchIds, processMatchArrays, updateAdminSettings, setMatches]);
-
-  const fetchMatchesFromSource = useCallback(async (source: JsonSource) => {
-    setLoadingSources(prev => ({ ...prev, [source.id]: true }));
-    setError(null);
-    try {
-      const response = await fetch(source.url);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch from ${source.name}: ${response.statusText}`);
-      }
-      const rawData: RawMatchData = await response.json();
-      
-      let parsedRawMatches = parseMatchesFromJson(rawData, source.url);
-
-      const { importStartDateOffsetDays, importEndDateOffsetDays } = source;
-      if (typeof importStartDateOffsetDays === 'number' && typeof importEndDateOffsetDays === 'number') {
-        const today = new Date();
-        
-        const filterStartDate = new Date(today);
-        filterStartDate.setDate(today.getDate() + importStartDateOffsetDays);
-        filterStartDate.setHours(0, 0, 0, 0);
-
-        const filterEndDate = new Date(today);
-        filterEndDate.setDate(today.getDate() + importEndDateOffsetDays);
-        filterEndDate.setHours(23, 59, 59, 999);
-        
-        parsedRawMatches = parsedRawMatches.filter(match => {
-          const matchDate = new Date(match.date);
-          return matchDate >= filterStartDate && matchDate <= filterEndDate;
-        });
-      }
-
-      const uniqueTeamsFromSource = new Map<string, { name: string; leagueName: string }>();
-      parsedRawMatches.forEach(match => {
-        const key1 = normalizeNameForKey(match.team1.name);
-        if (!uniqueTeamsFromSource.has(key1)) uniqueTeamsFromSource.set(key1, { name: match.team1.name, leagueName: match.leagueName });
-        const key2 = normalizeNameForKey(match.team2.name);
-        if (!uniqueTeamsFromSource.has(key2)) uniqueTeamsFromSource.set(key2, { name: match.team2.name, leagueName: match.leagueName });
-      });
-
-      for (const [key, teamInfo] of uniqueTeamsFromSource) {
-        const isManaged = managedTeams.some(mt => mt.nameKey === key && mt.logoUrl);
-        if (!isManaged) {
-          const guessedUrl = guessLogoUrl(teamInfo.name, teamInfo.leagueName);
-          if (guessedUrl) {
-            const existingManagedEntry = managedTeams.find(mt => mt.nameKey === key);
-            if (!existingManagedEntry || !existingManagedEntry.logoUrl) {
-                 addOrUpdateManagedTeam({
-                    nameKey: key,
-                    displayName: teamInfo.name,
-                    logoUrl: guessedUrl,
-                    leagueContext: teamInfo.leagueName,
-                    lastUpdated: new Date().toISOString()
-                });
-            }
-          }
-        }
-      }
-
-      setMatches(prevMatches => {
-        const otherMatches = prevMatches.filter(m => m.sourceUrl !== source.url);
-        return processMatchArrays([...otherMatches, ...parsedRawMatches]);
-      });
-      
-      setJsonSources(prevSources => prevSources.map(s => s.id === source.id ? {...s, lastImported: new Date().toISOString()} : s));
-
-    } catch (err: any) {
-      console.error(`Error fetching from ${source.name}:`, err);
-      setError(`Error fetching from ${source.name}: ${err.message}`);
-    } finally {
-      setLoadingSources(prev => ({ ...prev, [source.id]: false }));
-    }
-  }, [setMatches, setJsonSources, addOrUpdateManagedTeam, managedTeams, processMatchArrays]); 
   
-  const fetchAllMatchesFromSources = useCallback(async () => {
-    setGlobalLoading(true);
-    setError(null);
-    const manuallyAddedMatches = matches.filter(m => !m.sourceUrl || !jsonSources.some(js => js.url === m.sourceUrl));
-    setMatches(processMatchArrays(manuallyAddedMatches));
+  const toggleFeaturedMatch = useCallback(async (matchId: string) => {
+    const newFeaturedIds = featuredMatchIds.includes(matchId)
+      ? featuredMatchIds.filter(id => id !== matchId)
+      : [...featuredMatchIds, matchId];
+    await updateAdminSettings({ featuredMatchIds: newFeaturedIds });
+  }, [featuredMatchIds, updateAdminSettings]);
 
-    for (const source of jsonSources) {
-      await fetchMatchesFromSource(source); 
-    }
-    setGlobalLoading(false);
-  }, [jsonSources, fetchMatchesFromSource, setMatches, matches, processMatchArrays]);
-
-  const addMatch = useCallback((matchData: Omit<Match, 'id'>) => {
-    const newMatchId = generateId(); 
-    const newMatch: Match = { 
-        ...matchData, 
-        id: newMatchId,
-        isFeatured: !!matchData.isFeatured, 
-        viewCount: 0, 
-    };
+  const addMatch = useCallback(async (matchData: Omit<Match, 'id'>) => {
+    const newMatch: Match = { ...matchData, id: generateId() };
+    setMatches(prev => processMatchArrays([newMatch, ...prev])); // Optimistic update
     
-    if (newMatch.isFeatured) {
-        if (!featuredMatchIds.includes(newMatchId)) {
-            updateAdminSettings({ featuredMatchIds: [...featuredMatchIds, newMatchId] });
+    const { isFeatured, ...matchToInsert } = newMatch;
+
+    const { error } = await supabase.from('matches').insert([matchToInsert as unknown as Database['public']['Tables']['matches']['Insert']]);
+    if (error) {
+        console.error("Error adding match:", error);
+        setError(`Failed to add match: ${error.message}`);
+        setMatches(prev => prev.filter(m => m.id !== newMatch.id)); // Revert
+    } else if (newMatch.isFeatured) {
+        await toggleFeaturedMatch(newMatch.id);
+    }
+  }, [processMatchArrays, toggleFeaturedMatch]);
+
+  const updateMatch = useCallback(async (updatedMatch: Match) => {
+    const originalMatches = matches;
+    setMatches(prev => processMatchArrays(prev.map(m => m.id === updatedMatch.id ? updatedMatch : m))); // Optimistic update
+    
+    // isFeatured is not a db column, so we should not try to update it.
+    const { isFeatured, ...matchToUpdate } = updatedMatch;
+
+    const { error } = await supabase.from('matches').update(matchToUpdate as unknown as Database['public']['Tables']['matches']['Update']).eq('id', updatedMatch.id);
+    if (error) {
+        console.error("Error updating match:", error);
+        setError(`Failed to update match: ${error.message}`);
+        setMatches(originalMatches); // Revert
+    } else {
+        const isNowFeatured = !!updatedMatch.isFeatured;
+        const wasFeatured = featuredMatchIds.includes(updatedMatch.id);
+        if (isNowFeatured !== wasFeatured) {
+            await toggleFeaturedMatch(updatedMatch.id);
         }
     }
-    setMatches(prev => processMatchArrays([newMatch, ...prev]));
-  }, [featuredMatchIds, processMatchArrays, updateAdminSettings, setMatches]);
+  }, [matches, processMatchArrays, featuredMatchIds, toggleFeaturedMatch]);
 
+  const deleteMatch = async (matchId: string) => {
+    const originalMatches = matches;
+    const matchToDelete = originalMatches.find(m => m.id === matchId);
+    if (!matchToDelete) return;
 
-  const deleteMatch = (matchId: string) => {
-    setMatches(prevMatches => prevMatches.filter(m => m.id !== matchId));
-    if (featuredMatchIds.includes(matchId)) {
-        updateAdminSettings({ featuredMatchIds: featuredMatchIds.filter(id => id !== matchId) });
+    setMatches(prevMatches => prevMatches.filter(m => m.id !== matchId)); // Optimistic
+
+    // If the match came from a source, add it to the deleted list to prevent re-import
+    if (matchToDelete.sourceMatchId && matchToDelete.sourceUrl) {
+      // Use upsert to handle cases where it might already be marked as deleted.
+      const deletedEntry: Database['public']['Tables']['deleted_matches']['Insert'] = {
+        sourceMatchId: matchToDelete.sourceMatchId,
+        sourceUrl: matchToDelete.sourceUrl,
+        deleted_at: new Date().toISOString()
+      };
+      await supabase.from('deleted_matches').upsert([deletedEntry]).select();
+    }
+    
+    const { error } = await supabase.from('matches').delete().eq('id', matchId);
+    if (error) {
+        console.error("Error deleting match:", error);
+        setError(`Failed to delete match: ${error.message}`);
+        setMatches(originalMatches); // Revert optimistic UI update
+        // We don't revert the deleted_matches insert as it's a safe-guard.
+    } else {
+       await updateAdminSettings({ featuredMatchIds: featuredMatchIds.filter(id => id !== matchId) });
     }
   };
   
-  const bulkDeleteMatches = (matchIdsToDelete: string[]) => {
-    setMatches(prevMatches => prevMatches.filter(m => !matchIdsToDelete.includes(m.id)));
-    updateAdminSettings({ featuredMatchIds: featuredMatchIds.filter(id => !matchIdsToDelete.includes(id)) });
+  const bulkDeleteMatches = async (matchIdsToDelete: string[]) => {
+    const originalMatches = matches;
+    const matchesToDelete = originalMatches.filter(m => matchIdsToDelete.includes(m.id));
+    if (matchesToDelete.length === 0) return;
+
+    setMatches(prevMatches => prevMatches.filter(m => !matchIdsToDelete.includes(m.id))); // Optimistic
+
+    const deletedSourceEntries = matchesToDelete
+      .filter(m => m.sourceMatchId && m.sourceUrl)
+      .map(m => ({
+        sourceMatchId: m.sourceMatchId!,
+        sourceUrl: m.sourceUrl!,
+        deleted_at: new Date().toISOString(),
+      }));
+
+    if (deletedSourceEntries.length > 0) {
+      await supabase.from('deleted_matches').upsert(deletedSourceEntries as Database['public']['Tables']['deleted_matches']['Insert'][]).select();
+    }
+    
+    const { error } = await supabase.from('matches').delete().in('id', matchIdsToDelete);
+    if (error) {
+        console.error("Error bulk deleting matches:", error);
+        setError(`Failed to bulk delete matches: ${error.message}`);
+        setMatches(originalMatches); // Revert
+    } else {
+        await updateAdminSettings({ featuredMatchIds: featuredMatchIds.filter(id => !matchIdsToDelete.includes(id)) });
+    }
   };
 
-  const bulkUpdateMatchStatus = (matchIdsToUpdate: string[], status: MatchStatus) => {
-    setMatches(prevMatches =>
-      processMatchArrays(
-        prevMatches.map(m =>
-            matchIdsToUpdate.includes(m.id) ? { ...m, status } : m
-        )
-      )
-    );
+  const bulkUpdateMatchStatus = async (matchIdsToUpdate: string[], status: MatchStatus) => {
+    const originalMatches = matches;
+    setMatches(prev => processMatchArrays(prev.map(m => matchIdsToUpdate.includes(m.id) ? { ...m, status } : m)));
+    const { error } = await supabase.from('matches').update({ status: status as string }).in('id', matchIdsToUpdate);
+    if (error) {
+      console.error("Error bulk updating status:", error);
+      setError(`Failed to bulk update status: ${error.message}`);
+      setMatches(originalMatches); // Revert
+    }
   };
 
-  const bulkClearStreamLinks = (matchIdsToClear: string[]) => {
-    setMatches(prevMatches =>
-      processMatchArrays(
-          prevMatches.map(m =>
-            matchIdsToClear.includes(m.id) ? { ...m, streamLinks: [] } : m
-        )
-      )
-    );
+  const bulkClearStreamLinks = async (matchIdsToClear: string[]) => {
+    const originalMatches = matches;
+    setMatches(prev => processMatchArrays(prev.map(m => matchIdsToClear.includes(m.id) ? { ...m, streamLinks: [] } : m)));
+    const { error } = await supabase.from('matches').update({ streamLinks: [] as unknown as Json }).in('id', matchIdsToClear);
+    if (error) {
+      console.error("Error bulk clearing streams:", error);
+      setError(`Failed to clear streams: ${error.message}`);
+      setMatches(originalMatches); // Revert
+    }
   };
 
   const getMatchById = useCallback((matchId: string): Match | undefined => {
@@ -368,64 +339,131 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return undefined;
   }, [matches, processTeamForLogoDisplay, featuredMatchIds]);
   
-  const incrementMatchViewCount = useCallback((matchId: string) => {
-    const match = matches.find(m => m.id === matchId);
-    if (match) {
-      const newViewCount = (match.viewCount || 0) + 1;
-      updateMatch({ ...match, viewCount: newViewCount });
+  const fetchMatchesFromSource = useCallback(async (source: JsonSource) => {
+    setLoadingSources(prev => ({ ...prev, [source.id]: true }));
+    setError(null);
+    try {
+        const {data: existingMatches} = await supabase.from('matches').select('sourceMatchId').eq('sourceUrl', source.url);
+        const existingMatchIds = new Set(existingMatches?.map(m => m.sourceMatchId) || []);
+
+        const { data: deletedMatches } = await supabase.from('deleted_matches').select('sourceMatchId').eq('sourceUrl', source.url);
+        const deletedMatchIds = new Set(deletedMatches?.map(m => m.sourceMatchId) || []);
+
+        const response = await fetch(source.url);
+        if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+        const rawData: RawMatchData = await response.json();
+        
+        let parsedRawMatches = parseMatchesFromJson(rawData, source.url);
+        
+        const newMatches = parsedRawMatches.filter(m => 
+            m.sourceMatchId &&
+            !existingMatchIds.has(m.sourceMatchId) &&
+            !deletedMatchIds.has(m.sourceMatchId)
+        );
+
+        if (newMatches.length > 0) {
+            const matchesToInsert = newMatches.map(({ isFeatured, ...rest }) => rest);
+            const { error: insertError } = await supabase.from('matches').insert(matchesToInsert as unknown as Database['public']['Tables']['matches']['Insert'][]);
+            if (insertError) throw insertError;
+            setMatches(prev => processMatchArrays([...prev, ...newMatches]));
+        }
+
+        await setJsonSources(prevSources => prevSources.map(s => s.id === source.id ? {...s, lastImported: new Date().toISOString()} : s));
+    } catch (err: any) {
+      console.error(`Error fetching from ${source.name}:`, err);
+      setError(`Error from ${source.name}: ${err.message}`);
+    } finally {
+      setLoadingSources(prev => ({ ...prev, [source.id]: false }));
     }
-  }, [matches, updateMatch]);
+  }, [setJsonSources, processMatchArrays]); 
+  
+  const fetchAllMatchesFromSources = useCallback(async (overwrite: boolean = false) => {
+    setGlobalLoading(true);
+    setError(null);
+    let addedCount = 0;
+    let skippedCount = 0;
 
-  const toggleFeaturedMatch = useCallback((matchId: string) => {
-    const newFeaturedIds = featuredMatchIds.includes(matchId)
-      ? featuredMatchIds.filter(id => id !== matchId)
-      : [...featuredMatchIds, matchId];
+    if(overwrite) {
+        const sourceUrls = jsonSources.map(s => s.url);
+        const { error: deleteError } = await supabase.from('matches').delete().in('sourceUrl', sourceUrls);
+        if(deleteError) {
+             setGlobalLoading(false);
+             return { added: 0, skipped: 0, error: `Failed to clear old matches: ${deleteError.message}` };
+        }
+        setMatches(prev => prev.filter(m => !m.sourceUrl || !sourceUrls.includes(m.sourceUrl)));
+    }
     
-    updateAdminSettings({ featuredMatchIds: newFeaturedIds });
+    const { data: existingMatchesData } = await supabase.from('matches').select('sourceMatchId, sourceUrl');
+    const existingSourceMatches = new Set(existingMatchesData?.map(m => `${m.sourceUrl}::${m.sourceMatchId}`) || []);
 
-    setMatches(prevMatches => 
-      prevMatches.map(m => 
-        m.id === matchId ? { ...m, isFeatured: newFeaturedIds.includes(matchId) } : m
-      )
-    );
-  }, [featuredMatchIds, updateAdminSettings, setMatches]);
+    const { data: deletedMatchesData } = await supabase.from('deleted_matches').select('sourceMatchId, sourceUrl');
+    const deletedSourceMatches = new Set(deletedMatchesData?.map(m => `${m.sourceUrl}::${m.sourceMatchId}`) || []);
 
+    for (const source of jsonSources) {
+        try {
+            const response = await fetch(source.url);
+            if (!response.ok) continue; // Skip failed sources
+            const rawData: RawMatchData = await response.json();
+            const parsed = parseMatchesFromJson(rawData, source.url);
+            const matchesToAdd = parsed.filter(m => 
+                m.sourceMatchId &&
+                !existingSourceMatches.has(`${m.sourceUrl}::${m.sourceMatchId}`) &&
+                !deletedSourceMatches.has(`${m.sourceUrl}::${m.sourceMatchId}`)
+            );
+            
+            if (matchesToAdd.length > 0) {
+                const dbMatches = matchesToAdd.map(({isFeatured, ...rest}) => rest);
+                const { error: insertError } = await supabase.from('matches').insert(dbMatches as unknown as Database['public']['Tables']['matches']['Insert'][]);
+                if (!insertError) {
+                    addedCount += matchesToAdd.length;
+                    setMatches(prev => processMatchArrays([...prev, ...matchesToAdd]));
+                    matchesToAdd.forEach(m => existingSourceMatches.add(`${m.sourceUrl}::${m.sourceMatchId}`));
+                }
+            }
+            skippedCount += parsed.length - matchesToAdd.length;
+            await setJsonSources(prevSources => prevSources.map(s => s.id === source.id ? {...s, lastImported: new Date().toISOString()} : s));
+        } catch(e) { /* ignore single source error */ }
+    }
+    
+    setGlobalLoading(false);
+    return { added: addedCount, skipped: skippedCount };
+  }, [jsonSources, processMatchArrays, setJsonSources]);
 
   // Ad Management Functions
   const getAdSlot = useCallback((locationKey: AdLocationKey): AdSlot | undefined => {
     return adSlots.find(slot => slot.locationKey === locationKey && slot.isEnabled);
   }, [adSlots]);
 
-  const addOrUpdateAdSlot = useCallback((adSlot: AdSlot) => {
-    setAdminSettingsState(prev => {
-      const existingIndex = prev.adSlots.findIndex(s => s.id === adSlot.id);
-      let newAdSlots;
-      if (existingIndex > -1) {
-        newAdSlots = [...prev.adSlots];
-        newAdSlots[existingIndex] = { ...adSlot, lastUpdated: new Date().toISOString() };
-      } else {
-        const slotForLocationIndex = prev.adSlots.findIndex(s => s.locationKey === adSlot.locationKey);
-        if (slotForLocationIndex > -1) { 
-            newAdSlots = [...prev.adSlots];
-            newAdSlots[slotForLocationIndex] = { ...adSlot, id: prev.adSlots[slotForLocationIndex].id, lastUpdated: new Date().toISOString() };
-        } else { 
-            newAdSlots = [...prev.adSlots, { ...adSlot, id: generateId(), lastUpdated: new Date().toISOString() }];
-        }
-      }
-      return { ...prev, adSlots: newAdSlots };
-    });
-  }, [setAdminSettingsState]);
+  const addOrUpdateAdSlot = useCallback(async (adSlot: AdSlot) => {
+    const newAdSlots = [...adSlots];
+    const existingIndex = newAdSlots.findIndex(s => s.id === adSlot.id || s.locationKey === adSlot.locationKey);
+    if(existingIndex > -1) {
+        newAdSlots[existingIndex] = { ...adSlot, id: newAdSlots[existingIndex].id }; // ensure ID is preserved
+    } else {
+        newAdSlots.push({ ...adSlot, id: adSlot.id || generateId() });
+    }
+    await updateAdminSettings({ adSlots: newAdSlots });
+  }, [adSlots, updateAdminSettings]);
   
-  const deleteAdSlot = useCallback((adSlotId: string) => {
-    setAdminSettingsState(prev => {
-        const newAdSlots = prev.adSlots.map(slot => 
-            slot.id === adSlotId 
-            ? { ...slot, adCode: '', isEnabled: false, name: `Unconfigured (${slot.locationKey})`, lastUpdated: new Date().toISOString() } 
-            : slot
-        );
-        return { ...prev, adSlots: newAdSlots };
-    });
-  }, [setAdminSettingsState]);
+  const deleteAdSlot = useCallback(async (adSlotId: string) => {
+    const newAdSlots = adSlots.map(slot => 
+        slot.id === adSlotId 
+        ? { ...slot, adCode: '', isEnabled: false, name: `Unconfigured (${slot.locationKey})`, lastUpdated: new Date().toISOString() } 
+        : slot
+    );
+    await updateAdminSettings({ adSlots: newAdSlots });
+  }, [adSlots, updateAdminSettings]);
+
+  // Match Subscription and In-App Notification Logic
+  const toggleMatchSubscription = useCallback((matchId: string) => {
+    setSubscribedMatchIds(prev =>
+      prev.includes(matchId) ? prev.filter(id => id !== matchId) : [...prev, matchId]
+    );
+  }, [setSubscribedMatchIds]);
+
+  const isMatchSubscribed = useCallback((matchId: string): boolean => {
+    return subscribedMatchIds.includes(matchId);
+  }, [subscribedMatchIds]);
 
   const addAppNotification = useCallback((message: string, type: AppNotification['type'] = 'info', matchId?: string, notificationType?: AppNotification['notificationType']) => {
     const newNotification: AppNotification = {
@@ -439,65 +477,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveAppNotifications(prev => [newNotification, ...prev.slice(0, 4)]); // Keep max 5 notifications
   }, []);
 
-  // Match Subscription and Push Notification Logic
-  const toggleMatchSubscription = useCallback(async (matchId: string, matchName?: string) => {
-    const isCurrentlySubscribed = subscribedMatchIds.includes(matchId);
-    
-    setSubscribedMatchIds(prev =>
-      isCurrentlySubscribed ? prev.filter(id => id !== matchId) : [...prev, matchId]
-    );
-
-    // If subscribing for the first time (not just in-app, but to push)
-    if (!isCurrentlySubscribed) {
-        addAppNotification(`Subscribed to ${matchName || 'match'} alerts.`, 'info', matchId);
-        try {
-            if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-                addAppNotification('Browser push notifications are not supported.', 'warning', matchId);
-                return;
-            }
-
-            let permission = Notification.permission;
-            if (permission === 'default') {
-                addAppNotification('Requesting notification permission...', 'info', matchId);
-                permission = await askNotificationPermission();
-            }
-
-            if (permission === 'granted') {
-                addAppNotification('Subscribing to push notifications...', 'info', matchId);
-                const subscription = await subscribeUserToPush();
-                if (subscription) {
-                    await sendSubscriptionToBackend(subscription, matchId);
-                    addAppNotification(`Successfully subscribed to push notifications for ${matchName || 'this match'}!`, 'success', matchId);
-                } else {
-                    addAppNotification('Failed to subscribe to push notifications. Already subscribed or an error occurred.', 'warning', matchId);
-                }
-            } else if (permission === 'denied') {
-                addAppNotification('Notification permission denied. Please enable in browser settings.', 'warning', matchId);
-            }
-        } catch (error: any) {
-            console.error('Error during push subscription process:', error);
-            addAppNotification(`Error subscribing to push: ${error.message}`, 'error', matchId);
-        }
-    } else {
-      // Logic for unsubscribing from push notifications (to be implemented later)
-      // For now, just remove from in-app list.
-      addAppNotification(`Unsubscribed from ${matchName || 'match'} alerts.`, 'info', matchId);
-      // Example: await unsubscribeUserFromPush(matchId); // (from pushService.ts, needs implementation)
-    }
-  }, [subscribedMatchIds, setSubscribedMatchIds, addAppNotification]);
-
-  const isMatchSubscribed = useCallback((matchId: string): boolean => {
-    return subscribedMatchIds.includes(matchId);
-  }, [subscribedMatchIds]);
-
-
   const dismissAppNotification = useCallback((notificationId: string) => {
     setActiveAppNotifications(prev => prev.filter(n => n.id !== notificationId));
-  }, []);
-  
-  // Register SW on initial load
-  useEffect(() => {
-    registerServiceWorker();
   }, []);
 
   useEffect(() => {
@@ -511,23 +492,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (match.status === MatchStatus.UPCOMING && !notifiedStartingSoonRef.current.has(matchId)) {
             const diffMinutes = (matchDate.getTime() - now.getTime()) / (1000 * 60);
             if (diffMinutes > 0 && diffMinutes <= MINUTES_BEFORE_START_FOR_NOTIFICATION) {
-              addAppNotification(
-                `Match Starting Soon: ${match.team1.name} vs ${match.team2.name} in ~${Math.round(diffMinutes)} mins!`,
-                'info',
-                matchId,
-                'starting_soon'
-              );
+              addAppNotification(`Match Starting Soon: ${match.team1.name} vs ${match.team2.name} in ~${Math.round(diffMinutes)} mins!`, 'info', matchId, 'starting_soon');
               notifiedStartingSoonRef.current.add(matchId);
             }
           }
 
           if (match.status === MatchStatus.LIVE && !notifiedLiveRef.current.has(matchId)) {
-            addAppNotification(
-              `Match LIVE: ${match.team1.name} vs ${match.team2.name} has started!`,
-              'success',
-              matchId,
-              'match_live'
-            );
+            addAppNotification(`Match LIVE: ${match.team1.name} vs ${match.team2.name} has started!`, 'success', matchId, 'match_live');
             notifiedLiveRef.current.add(matchId);
             notifiedStartingSoonRef.current.delete(matchId);
           }
@@ -543,10 +514,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => clearInterval(intervalId);
   }, [subscribedMatchIds, matches, addAppNotification]);
 
+  // Effect to ensure matches have correct isFeatured flag when featuredMatchIds changes from settings
   useEffect(() => {
     setMatches(prev => processMatchArrays(prev));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [featuredMatchIds]); 
+  }, [adminSettings.featuredMatchIds]); 
 
   return (
     <AppContext.Provider value={{
@@ -568,22 +540,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       bulkDeleteMatches,
       bulkUpdateMatchStatus,
       bulkClearStreamLinks,
+      // TeamContext specific values
       managedTeams: adminSettings.managedTeams,
       addOrUpdateManagedTeam,
       deleteManagedTeam,
       getManagedTeamLogo,
       allDiscoveredTeamNames,
+      // Ad Management
       getAdSlot,
       addOrUpdateAdSlot,
       deleteAdSlot,
+      // Featured Matches
       toggleFeaturedMatch,
+      // Match Subscriptions & Notifications
       subscribedMatchIds,
       toggleMatchSubscription,
       isMatchSubscribed,
       activeAppNotifications,
       dismissAppNotification,
-      incrementMatchViewCount, 
-      generateTextWithGemini, 
     }}>
       {children}
     </AppContext.Provider>

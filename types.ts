@@ -1,4 +1,3 @@
-
 export interface Team {
   name: string;
   code?: string;
@@ -40,7 +39,6 @@ export interface Match {
   id: string; // UUID
   sourceMatchId?: string; // Optional: ID from the source system
   sourceUrl?: string; // URL of the JSON source this match came from
-  sourceTxtUrl?: string; // URL of the TXT source this match came from
   leagueName: string;
   round?: string;
   date: string; // ISO string format
@@ -52,9 +50,10 @@ export interface Match {
   status: MatchStatus;
   streamLinks: StreamLink[]; // Replaces streamUrl and streamType
   group?: string;
-  isFeatured?: boolean; 
-  viewCount?: number; 
+  isFeatured?: boolean; // New field for featured matches
 }
+
+export type PreviewMatch = Match & { isAlreadyImported?: boolean; isPermanentlyDeleted?: boolean; };
 
 export interface JsonSource {
   id: string; // UUID
@@ -146,8 +145,8 @@ export enum BulkActionType {
 // For better organization of context related to teams specifically
 export interface TeamContextType {
   managedTeams: ManagedTeam[];
-  addOrUpdateManagedTeam: (team: ManagedTeam) => void;
-  deleteManagedTeam: (teamNameKey: string) => void;
+  addOrUpdateManagedTeam: (team: ManagedTeam) => Promise<void>;
+  deleteManagedTeam: (teamNameKey: string) => Promise<void>;
   getManagedTeamLogo: (teamName: string, leagueName?: string) => string | undefined;
   allDiscoveredTeamNames: { name: string, league: string }[]; // All unique team names found in matches
 }
@@ -159,57 +158,5 @@ export interface AppNotification {
   type: 'info' | 'success' | 'warning' | 'error';
   timestamp: number;
   matchId?: string; // Optional: to link notification to a match
-  notificationType?: 'starting_soon' | 'match_live' | 'push_permission' | 'push_subscribed' | 'push_error'; // Extended
+  notificationType?: 'starting_soon' | 'match_live'; // Optional: for tracking notification purpose
 }
-
-// Push Subscription type for KV Store (aligns with PushSubscriptionJSON)
-export interface StoredPushSubscription {
-  endpoint: string;
-  expirationTime?: number | null;
-  keys: {
-    p256dh: string;
-    auth: string;
-  };
-}
-
-
-// AppContext core type, now including the Gemini function
-interface AppContextTypeCore {
-  matches: Match[];
-  setMatches: React.Dispatch<React.SetStateAction<Match[]>>;
-  adminSettings: AdminSettings;
-  updateAdminSettings: (newSettings: PartialAdminSettings | Pick<AdminSettings, 'managedTeams'> | PartialAdSlotsSettings | PartialFeaturedMatchesSettings) => void;
-  setJsonSources: React.Dispatch<React.SetStateAction<JsonSource[]>>; 
-  fetchMatchesFromSource: (source: JsonSource) => Promise<void>;
-  fetchAllMatchesFromSources: () => Promise<void>;
-  loadingSources: { [key: string]: boolean }; 
-  globalLoading: boolean;
-  error: string | null;
-  addMatch: (match: Omit<Match, 'id'>) => void;
-  updateMatch: (match: Match) => void;
-  deleteMatch: (matchId: string) => void;
-  getMatchById: (matchId: string) => Match | undefined;
-  leagues: string[];
-  bulkDeleteMatches: (matchIds: string[]) => void;
-  bulkUpdateMatchStatus: (matchIds: string[], status: MatchStatus) => void;
-  bulkClearStreamLinks: (matchIds: string[]) => void;
-  // Ad Management
-  getAdSlot: (locationKey: AdLocationKey) => AdSlot | undefined;
-  addOrUpdateAdSlot: (adSlot: AdSlot) => void;
-  deleteAdSlot: (adSlotId: string) => void;
-  // Featured Matches
-  toggleFeaturedMatch: (matchId: string) => void;
-  // Match Subscriptions & Notifications
-  subscribedMatchIds: string[];
-  toggleMatchSubscription: (matchId: string, matchName?: string) => void; // matchName for better notifications
-  isMatchSubscribed: (matchId: string) => boolean;
-  activeAppNotifications: AppNotification[];
-  dismissAppNotification: (notificationId: string) => void;
-  addAppNotification: (message: string, type?: AppNotification['type'], matchId?: string, notificationType?: AppNotification['notificationType']) => void; // Expose for direct use
-  incrementMatchViewCount: (matchId: string) => void; 
-  // Gemini API function
-  generateTextWithGemini: (prompt: string) => Promise<string>;
-}
-
-// Combined AppContextType
-export type AppContextType = AppContextTypeCore & TeamContextType;

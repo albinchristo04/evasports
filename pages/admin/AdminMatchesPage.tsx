@@ -26,6 +26,7 @@ const AdminMatchesPage: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState('');
   const [selectedMatchIds, setSelectedMatchIds] = useState<string[]>([]);
   const [bulkActionStatus, setBulkActionStatus] = useState<MatchStatus | ''>('');
+  const [isPerformingBulkAction, setIsPerformingBulkAction] = useState(false);
 
 
   const filteredMatches = useMemo(() => {
@@ -67,45 +68,49 @@ const AdminMatchesPage: React.FC = () => {
   
   const isAllSelected = filteredMatches.length > 0 && selectedMatchIds.length === filteredMatches.length;
 
-  const handleDelete = (matchId: string) => {
+  const handleDelete = async (matchId: string) => {
     if (window.confirm('Are you sure you want to delete this match? This action cannot be undone.')) {
-      deleteMatch(matchId);
+      await deleteMatch(matchId);
     }
   };
 
-  const handleBulkAction = (actionType: BulkActionType) => {
+  const handleBulkAction = async (actionType: BulkActionType) => {
     if (selectedMatchIds.length === 0) {
       alert("Please select at least one match.");
       return;
     }
 
+    setIsPerformingBulkAction(true);
+
     switch(actionType) {
       case BulkActionType.DELETE:
         if (window.confirm(`Are you sure you want to delete ${selectedMatchIds.length} selected match(es)? This action cannot be undone.`)) {
-          bulkDeleteMatches(selectedMatchIds);
+          await bulkDeleteMatches(selectedMatchIds);
           setSelectedMatchIds([]);
         }
         break;
       case BulkActionType.UPDATE_STATUS:
         if (!bulkActionStatus) {
           alert("Please select a status to update to.");
-          return;
+          break;
         }
         if (window.confirm(`Are you sure you want to update the status of ${selectedMatchIds.length} selected match(es) to "${bulkActionStatus}"?`)) {
-          bulkUpdateMatchStatus(selectedMatchIds, bulkActionStatus);
+          await bulkUpdateMatchStatus(selectedMatchIds, bulkActionStatus);
           setSelectedMatchIds([]);
           setBulkActionStatus('');
         }
         break;
       case BulkActionType.CLEAR_STREAMS:
         if (window.confirm(`Are you sure you want to clear all stream links for ${selectedMatchIds.length} selected match(es)?`)) {
-          bulkClearStreamLinks(selectedMatchIds);
+          await bulkClearStreamLinks(selectedMatchIds);
           setSelectedMatchIds([]);
         }
         break;
       default:
         console.warn("Unknown bulk action type");
     }
+
+    setIsPerformingBulkAction(false);
   };
 
 
@@ -159,7 +164,7 @@ const AdminMatchesPage: React.FC = () => {
         <div className="bg-gray-700 p-4 rounded-lg shadow-md space-y-3 md:space-y-0 md:flex md:flex-wrap md:items-center md:justify-between gap-4">
           <p className="text-sm text-neutral-text font-medium">{selectedMatchIds.length} match(es) selected.</p>
           <div className="flex flex-wrap gap-3 items-center">
-            <Button variant="danger" size="sm" onClick={() => handleBulkAction(BulkActionType.DELETE)}>
+            <Button variant="danger" size="sm" onClick={() => handleBulkAction(BulkActionType.DELETE)} isLoading={isPerformingBulkAction}>
               <TrashIcon className="h-4 w-4 mr-1.5"/> Delete Selected
             </Button>
             <div className="flex gap-2 items-center">
@@ -169,18 +174,18 @@ const AdminMatchesPage: React.FC = () => {
                 onChange={(e) => setBulkActionStatus(e.target.value as MatchStatus | '')}
                 className="bg-neutral-dark border-gray-600 text-sm py-1.5"
               />
-              <Button variant="secondary" size="sm" onClick={() => handleBulkAction(BulkActionType.UPDATE_STATUS)} disabled={!bulkActionStatus}>
+              <Button variant="secondary" size="sm" onClick={() => handleBulkAction(BulkActionType.UPDATE_STATUS)} disabled={!bulkActionStatus} isLoading={isPerformingBulkAction}>
                 <CheckCircleIcon className="h-4 w-4 mr-1.5"/> Update Status
               </Button>
             </div>
-            <Button variant="outline" size="sm" onClick={() => handleBulkAction(BulkActionType.CLEAR_STREAMS)}>
+            <Button variant="outline" size="sm" onClick={() => handleBulkAction(BulkActionType.CLEAR_STREAMS)} isLoading={isPerformingBulkAction}>
               <XCircleIcon className="h-4 w-4 mr-1.5"/> Clear Stream Links
             </Button>
           </div>
         </div>
       )}
       
-      {globalLoading && filteredMatches.length === 0 ? <div className="text-center py-10"><Spinner size="lg" color="text-[var(--theme-accent)]"/></div> :
+      {globalLoading && matches.length === 0 ? <div className="text-center py-10"><Spinner size="lg" color="text-[var(--theme-accent)]"/></div> :
       filteredMatches.length === 0 ? <p className="text-center text-gray-400 py-10">No matches found with current filters.</p> : (
       <div className="overflow-x-auto bg-gray-800 rounded-xl shadow-lg">
         <table className="min-w-full divide-y divide-gray-700">

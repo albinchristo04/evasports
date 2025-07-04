@@ -22,8 +22,8 @@ const getAdLocationName = (locationKey: AdLocationKey): string => {
 interface AdSlotModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (adSlotConfig: Pick<AdSlot, 'name' | 'adCode' | 'isEnabled' | 'locationKey'>) => void;
-  onDelete: (locationKey: AdLocationKey) => void; // Used to clear config for a location
+  onSave: (adSlotConfig: Pick<AdSlot, 'name' | 'adCode' | 'isEnabled' | 'locationKey'>) => Promise<void>;
+  onDelete: (locationKey: AdLocationKey) => Promise<void>; // Used to clear config for a location
   locationKey: AdLocationKey;
   currentAdSlot?: AdSlot; // The existing AdSlot for this locationKey, if any
 }
@@ -32,6 +32,7 @@ const AdSlotModal: React.FC<AdSlotModalProps> = ({ isOpen, onClose, onSave, onDe
   const [name, setName] = useState('');
   const [adCode, setAdCode] = useState('');
   const [isEnabled, setIsEnabled] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (currentAdSlot) {
@@ -47,14 +48,18 @@ const AdSlotModal: React.FC<AdSlotModalProps> = ({ isOpen, onClose, onSave, onDe
 
   if (!isOpen) return null;
 
-  const handleSave = () => {
-    onSave({ name, adCode, isEnabled, locationKey });
+  const handleSave = async () => {
+    setIsSaving(true);
+    await onSave({ name, adCode, isEnabled, locationKey });
+    setIsSaving(false);
     onClose();
   };
   
-  const handleDeleteConfig = () => {
+  const handleDeleteConfig = async () => {
     if (window.confirm(`Are you sure you want to clear the ad configuration for ${getAdLocationName(locationKey)}?`)) {
-        onDelete(locationKey); // Call context's delete/clear function
+        setIsSaving(true);
+        await onDelete(locationKey);
+        setIsSaving(false);
         onClose();
     }
   };
@@ -71,11 +76,11 @@ const AdSlotModal: React.FC<AdSlotModalProps> = ({ isOpen, onClose, onSave, onDe
         </div>
         <div className="flex justify-between items-center pt-4 border-t border-gray-700">
             {currentAdSlot && currentAdSlot.adCode && (
-                 <Button onClick={handleDeleteConfig} variant="danger" size="sm">Clear Ad Configuration</Button>
+                 <Button onClick={handleDeleteConfig} variant="danger" size="sm" isLoading={isSaving}>Clear Ad Configuration</Button>
             )}
             <div className="flex justify-end space-x-3 flex-grow">
-                 <Button onClick={onClose} variant="outline">Cancel</Button>
-                 <Button onClick={handleSave} variant="primary">Save Ad Slot</Button>
+                 <Button onClick={onClose} variant="outline" disabled={isSaving}>Cancel</Button>
+                 <Button onClick={handleSave} variant="primary" isLoading={isSaving}>Save Ad Slot</Button>
             </div>
         </div>
       </div>
@@ -94,10 +99,11 @@ const AdminSettingsPage: React.FC = () => {
     fetchAllMatchesFromSources, 
     globalLoading,
     addOrUpdateAdSlot,
-    deleteAdSlot: clearAdSlotConfiguration, // Using a more descriptive name here
+    deleteAdSlot: clearAdSlotConfiguration,
   } = useAppContext();
   
   const [activeTab, setActiveTab] = useState<AdminSettingsTab>('general');
+  const [isSaving, setIsSaving] = useState(false);
   
   // State for General Settings
   const [siteName, setSiteName] = useState(adminSettings.siteName);
@@ -149,12 +155,14 @@ const AdminSettingsPage: React.FC = () => {
     setTimeout(() => setSettingsSavedMessage(''), 3000);
   };
 
-  const handleSaveSettings = (settingsToUpdate: PartialAdminSettings, message: string) => {
-    updateAdminSettings(settingsToUpdate);
+  const handleSaveSettings = async (settingsToUpdate: PartialAdminSettings, message: string) => {
+    setIsSaving(true);
+    await updateAdminSettings(settingsToUpdate);
+    setIsSaving(false);
     showSavedMessage(message);
   };
 
-  const handleAddSource = () => {
+  const handleAddSource = async () => {
     if (newSource.name && newSource.url) {
       const sourceToAdd: JsonSource = {
         name: newSource.name,
@@ -165,14 +173,14 @@ const AdminSettingsPage: React.FC = () => {
       };
       if (isNaN(sourceToAdd.importStartDateOffsetDays!)) sourceToAdd.importStartDateOffsetDays = undefined;
       if (isNaN(sourceToAdd.importEndDateOffsetDays!)) sourceToAdd.importEndDateOffsetDays = undefined;
-
-      setJsonSources(prev => [...prev, sourceToAdd]);
+      
+      await setJsonSources(prev => [...prev, sourceToAdd]);
       setNewSource({ name: '', url: '', startOffset: '-2', endOffset: '14' });
       showSavedMessage('JSON Source added.');
     }
   };
 
-  const handleUpdateSource = () => {
+  const handleUpdateSource = async () => {
     if (editingSource) {
       const updatedSourceData: JsonSource = {
         ...editingSource,
@@ -182,11 +190,10 @@ const AdminSettingsPage: React.FC = () => {
       if (isNaN(updatedSourceData.importStartDateOffsetDays!)) updatedSourceData.importStartDateOffsetDays = undefined;
       if (isNaN(updatedSourceData.importEndDateOffsetDays!)) updatedSourceData.importEndDateOffsetDays = undefined;
       
-      // Remove temporary string offset fields before saving
       delete (updatedSourceData as any).startOffset;
       delete (updatedSourceData as any).endOffset;
 
-      setJsonSources(prev => prev.map(s => s.id === updatedSourceData.id ? updatedSourceData : s));
+      await setJsonSources(prev => prev.map(s => s.id === updatedSourceData.id ? updatedSourceData : s));
       setEditingSource(null);
       showSavedMessage('JSON Source updated.');
     }
@@ -200,57 +207,47 @@ const AdminSettingsPage: React.FC = () => {
     });
   };
 
-
-  const handleDeleteSource = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this source? This will not delete matches already imported from it unless you re-import all.')) {
-        setJsonSources(prev => prev.filter(s => s.id !== id));
+  const handleDeleteSource = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this source? This will not delete matches already imported from it.')) {
+        await setJsonSources(prev => prev.filter(s => s.id !== id));
         showSavedMessage('JSON Source deleted.');
     }
   };
   
   const handleImportAll = async () => {
-    if (window.confirm('This will remove all matches previously imported from these sources and re-import them. Manually added matches will remain. Continue?')) {
-      await fetchAllMatchesFromSources();
-      showSavedMessage('All matches re-imported from sources.');
+    if (window.confirm('This will fetch new matches from all sources. Existing matches will not be affected. Continue?')) {
+      const {added, skipped, error} = await fetchAllMatchesFromSources();
+      if(error) {
+        showSavedMessage(error);
+      } else {
+        showSavedMessage(`Import complete. Added ${added} new matches, skipped ${skipped} existing.`);
+      }
     }
   };
 
-  // Advertising Modal Handlers
   const openAdModal = (locationKey: AdLocationKey) => {
     setSelectedAdLocationKey(locationKey);
     setIsAdModalOpen(true);
   };
 
-  const handleSaveAdSlot = (adSlotConfig: Pick<AdSlot, 'name' | 'adCode' | 'isEnabled' | 'locationKey'>) => {
+  const handleSaveAdSlot = async (adSlotConfig: Pick<AdSlot, 'name' | 'adCode' | 'isEnabled' | 'locationKey'>) => {
     const existingAdSlotForLocation = adminSettings.adSlots.find(s => s.locationKey === adSlotConfig.locationKey);
     const slotToSave: AdSlot = {
-      id: existingAdSlotForLocation?.id || generateId(), // Use existing ID if updating, else new
+      id: existingAdSlotForLocation?.id || generateId(),
       ...adSlotConfig,
       lastUpdated: new Date().toISOString()
     };
-    addOrUpdateAdSlot(slotToSave);
+    await addOrUpdateAdSlot(slotToSave);
     showSavedMessage(`Ad slot for ${getAdLocationName(adSlotConfig.locationKey)} saved.`);
   };
 
-  const handleClearAdSlot = (locationKey: AdLocationKey) => {
+  const handleClearAdSlot = async (locationKey: AdLocationKey) => {
     const slotToClear = adminSettings.adSlots.find(s => s.locationKey === locationKey);
     if (slotToClear) {
-      // We call deleteAdSlot which is designed to clear an existing slot's config by its ID
-      clearAdSlotConfiguration(slotToClear.id); 
+      await clearAdSlotConfiguration(slotToClear.id); 
       showSavedMessage(`Ad configuration for ${getAdLocationName(locationKey)} cleared.`);
-    } else {
-       addOrUpdateAdSlot({
-           id: generateId(), 
-           locationKey: locationKey,
-           name: `Unconfigured (${getAdLocationName(locationKey)})`,
-           adCode: '',
-           isEnabled: false,
-           lastUpdated: new Date().toISOString()
-       });
-        showSavedMessage(`Ad configuration for ${getAdLocationName(locationKey)} cleared.`);
     }
   };
-
 
   const tabButtonClass = (tabName: AdminSettingsTab) => 
     `px-4 py-2.5 rounded-md font-medium transition-colors text-sm flex items-center space-x-2
@@ -266,7 +263,7 @@ const AdminSettingsPage: React.FC = () => {
             <Input label="Site Name" value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="Your Sport Streaming Site" />
             <Input label="Favicon URL" value={faviconUrl} onChange={(e) => setFaviconUrl(e.target.value)} placeholder="/favicon.ico or https://..." />
             <Input label="Custom Logo URL" value={customLogoUrl} onChange={(e) => setCustomLogoUrl(e.target.value)} placeholder="https://example.com/logo.png (leave blank for default)" />
-            <Button onClick={() => handleSaveSettings({ siteName, faviconUrl, customLogoUrl }, 'General settings saved!')} variant="primary">Save General Settings</Button>
+            <Button onClick={() => handleSaveSettings({ siteName, faviconUrl, customLogoUrl }, 'General settings saved!')} variant="primary" isLoading={isSaving}>Save General Settings</Button>
           </div>
         );
       case 'appearance':
@@ -278,7 +275,7 @@ const AdminSettingsPage: React.FC = () => {
                 <Input label="Secondary Color" type="text" value={themeSecondaryColor} onChange={(e) => setThemeSecondaryColor(e.target.value)} placeholder="#6f42c1" Icon={() => <span style={{backgroundColor: themeSecondaryColor}} className="w-4 h-4 rounded border border-gray-500 block"></span>}/>
                 <Input label="Accent Color" type="text" value={themeAccentColor} onChange={(e) => setThemeAccentColor(e.target.value)} placeholder="#10B981" Icon={() => <span style={{backgroundColor: themeAccentColor}} className="w-4 h-4 rounded border border-gray-500 block"></span>}/>
             </div>
-            <Button onClick={() => handleSaveSettings({ themePrimaryColor, themeSecondaryColor, themeAccentColor }, 'Appearance settings saved!')} variant="primary">Save Appearance</Button>
+            <Button onClick={() => handleSaveSettings({ themePrimaryColor, themeSecondaryColor, themeAccentColor }, 'Appearance settings saved!')} variant="primary" isLoading={isSaving}>Save Appearance</Button>
           </div>
         );
       case 'seo':
@@ -288,7 +285,7 @@ const AdminSettingsPage: React.FC = () => {
             <Input as="textarea" label="Default Meta Description" value={seoDefaultMetaDescription} onChange={(e) => setSeoDefaultMetaDescription(e.target.value)} className="min-h-[80px]" />
             <Input label="Default Meta Keywords (comma-separated)" value={seoDefaultMetaKeywords} onChange={(e) => setSeoDefaultMetaKeywords(e.target.value)} />
             <Input label="Default Open Graph Image URL" value={seoOpenGraphImageUrl} onChange={(e) => setSeoOpenGraphImageUrl(e.target.value)} placeholder="https://example.com/default-og-image.jpg" />
-            <Button onClick={() => handleSaveSettings({ seoMetaTitleSuffix, seoDefaultMetaDescription, seoDefaultMetaKeywords, seoOpenGraphImageUrl }, 'SEO settings saved!')} variant="primary">Save SEO Settings</Button>
+            <Button onClick={() => handleSaveSettings({ seoMetaTitleSuffix, seoDefaultMetaDescription, seoDefaultMetaKeywords, seoOpenGraphImageUrl }, 'SEO settings saved!')} variant="primary" isLoading={isSaving}>Save SEO Settings</Button>
           </div>
         );
       case 'codeInjection':
@@ -296,7 +293,7 @@ const AdminSettingsPage: React.FC = () => {
           <div className="space-y-4">
             <Input as="textarea" label="Header Code (Global scripts, meta tags for <head>)" value={headerCode} onChange={(e) => setHeaderCode(e.target.value)} placeholder="e.g., Google Analytics script" className="min-h-[120px] font-mono text-sm" />
             <Input as="textarea" label="Footer Code (Global scripts, tracking pixels before </body>)" value={footerCode} onChange={(e) => setFooterCode(e.target.value)} placeholder="e.g., Tracking pixels" className="min-h-[120px] font-mono text-sm" />
-            <Button onClick={() => handleSaveSettings({ headerCode, footerCode }, 'Code injection settings saved!')} variant="primary">Save Code Injections</Button>
+            <Button onClick={() => handleSaveSettings({ headerCode, footerCode }, 'Code injection settings saved!')} variant="primary" isLoading={isSaving}>Save Code Injections</Button>
           </div>
         );
       case 'jsonSources':
@@ -306,7 +303,7 @@ const AdminSettingsPage: React.FC = () => {
                 <h3 className="text-xl font-semibold text-gray-300">Manage JSON Sources</h3>
                 <Button onClick={handleImportAll} isLoading={globalLoading} variant="secondary" size="md">
                     <ArrowPathIcon className="h-5 w-5 mr-2" />
-                    Refresh All Matches from Sources
+                    Add New Matches from All Sources
                 </Button>
             </div>
             {adminSettings.jsonSources.map(source => (
@@ -322,7 +319,7 @@ const AdminSettingsPage: React.FC = () => {
                             value={editingSource.startOffset || ''} 
                             onChange={(e) => setEditingSource({...editingSource!, startOffset: e.target.value})} 
                             placeholder="-1 (yesterday)"
-                            title="Days from today to start importing (e.g., -1 for yesterday, 0 for today). Leave blank for no start date filter."
+                            title="Days from today to start importing (e.g., -1 for yesterday). Leave blank for no start date filter."
                         />
                         <Input 
                             label="End Day Offset" 
@@ -352,7 +349,7 @@ const AdminSettingsPage: React.FC = () => {
                       {source.lastImported && <p className="text-xs text-emerald-400 mt-1">Last Imported: {formatDate(source.lastImported)}</p>}
                     </div>
                     <div className="flex space-x-2 flex-shrink-0 self-end md:self-center">
-                      <Button onClick={() => fetchMatchesFromSource(source)} isLoading={loadingSources[source.id]} size="sm" variant="ghost" title="Import from this source"><ArrowPathIcon className="h-5 w-5" /></Button>
+                      <Button onClick={() => fetchMatchesFromSource(source)} isLoading={loadingSources[source.id]} size="sm" variant="ghost" title="Add new matches from this source"><ArrowPathIcon className="h-5 w-5" /></Button>
                       <Button onClick={() => handleEditSourceClick(source)} size="sm" variant="outline" title="Edit Source"><PencilIcon className="h-4 w-4"/></Button>
                       <Button onClick={() => handleDeleteSource(source.id)} size="sm" variant="danger" title="Delete Source"><TrashIcon className="h-5 w-5" /></Button>
                     </div>

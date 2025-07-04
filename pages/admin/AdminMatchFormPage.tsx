@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../../AppContext';
@@ -81,9 +80,10 @@ const StreamLinkModal: React.FC<StreamLinkModalProps> = ({ isOpen, onClose, onSa
 const AdminMatchFormPage: React.FC = () => {
   const { matchId } = useParams<{ matchId?: string }>();
   const navigate = useNavigate();
-  const { addMatch, updateMatch, getMatchById, leagues: availableLeagues, toggleFeaturedMatch, adminSettings } = useAppContext();
+  const { addMatch, updateMatch, getMatchById, leagues: availableLeagues, adminSettings } = useAppContext();
 
   const isEditing = Boolean(matchId);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [matchData, setMatchData] = useState<Omit<Match, 'id' | 'sourceMatchId' | 'sourceUrl'>>({
     leagueName: '',
     date: new Date().toISOString().split('T')[0], 
@@ -123,7 +123,7 @@ const AdminMatchFormPage: React.FC = () => {
       setMatchData(prev => ({ ...prev, isFeatured: false }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchId, isEditing, navigate, adminSettings.featuredMatchIds]); // getMatchById is stable due to useCallback
+  }, [matchId, isEditing, navigate, adminSettings.featuredMatchIds]); // getMatchById is stable
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
@@ -178,8 +178,9 @@ const AdminMatchFormPage: React.FC = () => {
   };
 
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSubmitting(true);
     const fullDateISO = new Date(`${matchData.date}T${matchData.time || '00:00:00'}`).toISOString();
     
     const finalMatchDataForSave = {
@@ -189,15 +190,19 @@ const AdminMatchFormPage: React.FC = () => {
         score2: matchData.score2 === null ? undefined : matchData.score2,
     };
 
-    if (isEditing && matchId) {
-      updateMatch({ ...finalMatchDataForSave, id: matchId } as Match);
-      // toggleFeaturedMatch handles adminSettings.featuredMatchIds update implicitly via updateMatch
-    } else {
-      // For new matches, addMatch will handle setting isFeatured correctly based on the checkbox,
-      // and it will also update adminSettings.featuredMatchIds if needed.
-      addMatch(finalMatchDataForSave as Omit<Match, 'id'>);
+    try {
+        if (isEditing && matchId) {
+          await updateMatch({ ...finalMatchDataForSave, id: matchId } as Match);
+        } else {
+          await addMatch(finalMatchDataForSave as Omit<Match, 'id'>);
+        }
+        navigate('/admin/matches');
+    } catch (error) {
+        console.error("Failed to save match", error);
+        // You might want to show an error message to the user here
+    } finally {
+        setIsSubmitting(false);
     }
-    navigate('/admin/matches');
   };
 
   const statusOptions = Object.values(MatchStatus).map(s => ({ value: s, label: s }));
@@ -284,8 +289,8 @@ const AdminMatchFormPage: React.FC = () => {
         />
 
         <div className="flex justify-end space-x-4 pt-6 border-t border-gray-700 mt-8">
-          <Button type="button" variant="outline" onClick={() => navigate('/admin/matches')}>Cancel</Button>
-          <Button type="submit" variant="primary">{isEditing ? 'Save Changes' : 'Add Match'}</Button>
+          <Button type="button" variant="outline" onClick={() => navigate('/admin/matches')} disabled={isSubmitting}>Cancel</Button>
+          <Button type="submit" variant="primary" isLoading={isSubmitting}>{isEditing ? 'Save Changes' : 'Add Match'}</Button>
         </div>
       </form>
     </div>

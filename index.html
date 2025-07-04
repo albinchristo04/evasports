@@ -33,7 +33,7 @@
     "react/": "https://esm.sh/react@^19.1.0/",
     "react-router-dom": "https://esm.sh/react-router-dom@^7.6.2",
     "uuid": "https://esm.sh/uuid@^11.1.0",
-    "@google/genai": "https://esm.sh/@google/genai@^1.7.0"
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2"
   }
 }
 </script>
@@ -42,23 +42,5 @@
 <body class="bg-neutral-darker">
   <div id="root"></div>
   <script type="module" src="/index.tsx"></script>
-  <script>
-    // Register Service Worker
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        // Construct an absolute URL for sw.js based on the current window's origin
-        const swUrl = `${window.location.origin}/sw.js`;
-        navigator.serviceWorker.register(swUrl)
-          .then(registration => {
-            console.log('ServiceWorker registration successful with scope: ', registration.scope);
-            console.log('Registered SW from URL:', swUrl);
-          })
-          .catch(error => {
-            console.log('ServiceWorker registration failed: ', error);
-            console.log('Attempted to register SW from URL:', swUrl);
-          });
-      });
-    }
-  </script>
 </body>
 </html>

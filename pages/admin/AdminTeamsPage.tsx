@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useCallback } from 'react';
 import { useAppContext } from '../../AppContext';
 import { ManagedTeam } from '../../types';
@@ -22,6 +21,7 @@ const AdminTeamsPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showOnlyUnmanaged, setShowOnlyUnmanaged] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [isSearchingLogoFor, setIsSearchingLogoFor] = useState<string | null>(null);
   const [isBulkSearchingLogos, setIsBulkSearchingLogos] = useState(false);
   const [bulkSearchProgress, setBulkSearchProgress] = useState(0);
@@ -38,22 +38,24 @@ const AdminTeamsPage: React.FC = () => {
     setNewLogoUrl(team.logoUrl);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (editingTeam) {
-      addOrUpdateManagedTeam({ 
+      setIsSaving(true);
+      await addOrUpdateManagedTeam({ 
         ...editingTeam, 
         logoUrl: newLogoUrl,
         lastUpdated: new Date().toISOString()
       });
+      setIsSaving(false);
       displayFeedback(`Logo for ${editingTeam.displayName} updated.`);
       setEditingTeam(null);
       setNewLogoUrl('');
     }
   };
   
-  const handleDeleteManagedEntry = (teamNameKey: string) => {
+  const handleDeleteManagedEntry = async (teamNameKey: string) => {
     if (window.confirm('Are you sure you want to remove this managed team entry? This will not affect existing matches but may affect future imports if the logo was auto-guessed.')) {
-      deleteManagedTeam(teamNameKey);
+      await deleteManagedTeam(teamNameKey);
       displayFeedback(`Managed entry for ${teamNameKey} deleted.`);
     }
   };
@@ -74,7 +76,7 @@ const AdminTeamsPage: React.FC = () => {
                 lastUpdated: new Date().toISOString()
             };
         
-        addOrUpdateManagedTeam(entryToUpdate);
+        await addOrUpdateManagedTeam(entryToUpdate);
         displayFeedback(`Logo found and updated for ${team.name}!`);
         
         if (editingTeam?.nameKey === team.nameKey) {
@@ -107,7 +109,7 @@ const AdminTeamsPage: React.FC = () => {
             leagueContext: discoveredTeam.league,
             lastUpdated: new Date().toISOString()
         };
-        // Add first, then open for editing. This makes it part of `managedTeams` for consistency.
+        // Add first, then open for editing.
         addOrUpdateManagedTeam(newManagedEntry); 
         handleEdit(newManagedEntry); 
         displayFeedback(`New entry for ${discoveredTeam.name} created. You can search online or set logo manually.`);
@@ -129,19 +131,16 @@ const AdminTeamsPage: React.FC = () => {
         const nameKey = normalizeNameForKey(dt.name);
         const managedEntry = managedTeams.find(mt => mt.nameKey === nameKey);
         if (managedEntry) {
-            // If managed, use its data
-            if (!teamsMap.has(nameKey)) { // Prioritize managed entry
+            if (!teamsMap.has(nameKey)) {
                  teamsMap.set(nameKey, {type: 'managed', data: managedEntry, nameKey, displayName: managedEntry.displayName, leagueContext: managedEntry.leagueContext, logoUrl: managedEntry.logoUrl });
             }
         } else {
-            // If not managed, add as discovered
              if (!teamsMap.has(nameKey)) {
                 teamsMap.set(nameKey, { type: 'discovered', data: dt, nameKey, displayName: dt.name, leagueContext: dt.league, logoUrl: guessLogoUrl(dt.name, dt.league) });
              }
         }
     });
     
-    // Ensure all managed teams are included, even if not in current matches (allDiscoveredTeamNames)
     managedTeams.forEach(mt => {
         if (!teamsMap.has(mt.nameKey)) {
             teamsMap.set(mt.nameKey, {type: 'managed', data: mt, nameKey: mt.nameKey, displayName: mt.displayName, leagueContext: mt.leagueContext, logoUrl: mt.logoUrl });
@@ -173,7 +172,6 @@ const AdminTeamsPage: React.FC = () => {
     for (let i = 0; i < teamsToSearch.length; i++) {
       const team = teamsToSearch[i];
       setBulkSearchProgress(i + 1);
-      // Skip if already searching for this specific team due to individual click
       if (isSearchingLogoFor === team.nameKey) continue; 
       
       try {
@@ -189,13 +187,11 @@ const AdminTeamsPage: React.FC = () => {
               leagueContext: team.leagueContext,
               lastUpdated: new Date().toISOString()
             };
-          addOrUpdateManagedTeam(entryToUpdate);
+          await addOrUpdateManagedTeam(entryToUpdate);
         }
       } catch (error) {
         console.error(`Error bulk searching for ${team.displayName}:`, error);
       }
-      // Small delay to prevent overwhelming API if many requests, and allow UI to update
-      // await new Promise(resolve => setTimeout(resolve, 50)); 
     }
 
     setIsBulkSearchingLogos(false);
@@ -275,8 +271,8 @@ const AdminTeamsPage: React.FC = () => {
                         <MagnifyingGlassIcon className="h-4 w-4 mr-1.5"/> Search Online Again
                     </Button>
                     <div className="flex space-x-3">
-                        <Button onClick={() => setEditingTeam(null)} variant="outline">Cancel</Button>
-                        <Button onClick={handleSave} variant="primary">Save Logo</Button>
+                        <Button onClick={() => setEditingTeam(null)} variant="outline" disabled={isSaving}>Cancel</Button>
+                        <Button onClick={handleSave} variant="primary" isLoading={isSaving}>Save Logo</Button>
                     </div>
                 </div>
             </div>
