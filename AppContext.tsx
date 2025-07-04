@@ -86,7 +86,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const dbSettings = settingsData.settings_data as Partial<AdminSettings>;
         setAdminSettingsState(prev => ({...prev, ...dbSettings}));
       } else { // No settings found, insert initial settings
-        const { error: upsertError } = await supabase.from('settings').upsert([{ id: 1, settings_data: INITIAL_ADMIN_SETTINGS }] as any);
+        const initialSettingsForDb: Database['public']['Tables']['settings']['Insert'] = {
+            id: 1,
+            settings_data: INITIAL_ADMIN_SETTINGS as Json,
+        };
+        const { error: upsertError } = await supabase.from('settings').upsert([initialSettingsForDb]);
         if(upsertError) {
             console.error("Error saving initial settings:", upsertError);
             setError(`Error saving initial settings: ${upsertError.message}`);
@@ -123,7 +127,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const { error: dbError } = await supabase
         .from('settings')
-        .update({ settings_data: updatedSettingsData, updated_at: new Date().toISOString() } as any)
+        .update({ settings_data: updatedSettingsData as Json, updated_at: new Date().toISOString() })
         .eq('id', 1);
 
     if (dbError) {
@@ -214,8 +218,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setMatches(prev => processMatchArrays([newMatch, ...prev])); // Optimistic update
     
     const { isFeatured, ...matchToInsert } = newMatch;
+    
+    const matchToInsertDb: Database['public']['Tables']['matches']['Insert'] = {
+        ...matchToInsert,
+        streamLinks: matchToInsert.streamLinks as Json,
+        team1: matchToInsert.team1 as Json,
+        team2: matchToInsert.team2 as Json,
+    };
 
-    const { error } = await supabase.from('matches').insert([matchToInsert] as any);
+    const { error } = await supabase.from('matches').insert([matchToInsertDb]);
     if (error) {
         console.error("Error adding match:", error);
         setError(`Failed to add match: ${error.message}`);
@@ -231,8 +242,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     
     // isFeatured is not a db column, so we should not try to update it.
     const { isFeatured, ...matchToUpdate } = updatedMatch;
+    
+    const matchToUpdateDb: Database['public']['Tables']['matches']['Update'] = {
+        ...matchToUpdate,
+        streamLinks: matchToUpdate.streamLinks as Json,
+        team1: matchToUpdate.team1 as Json,
+        team2: matchToUpdate.team2 as Json,
+    };
 
-    const { error } = await supabase.from('matches').update(matchToUpdate as any).eq('id', updatedMatch.id);
+    const { error } = await supabase.from('matches').update(matchToUpdateDb).eq('id', updatedMatch.id);
     if (error) {
         console.error("Error updating match:", error);
         setError(`Failed to update match: ${error.message}`);
@@ -261,7 +279,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         sourceUrl: matchToDelete.sourceUrl,
         deleted_at: new Date().toISOString()
       };
-      await supabase.from('deleted_matches').upsert([deletedEntry] as any).select();
+      await supabase.from('deleted_matches').upsert([deletedEntry]).select();
     }
     
     const { error } = await supabase.from('matches').delete().eq('id', matchId);
@@ -282,7 +300,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setMatches(prevMatches => prevMatches.filter(m => !matchIdsToDelete.includes(m.id))); // Optimistic
 
-    const deletedSourceEntries = matchesToDelete
+    const deletedSourceEntries: Database['public']['Tables']['deleted_matches']['Insert'][] = matchesToDelete
       .filter(m => m.sourceMatchId && m.sourceUrl)
       .map(m => ({
         sourceMatchId: m.sourceMatchId!,
@@ -291,7 +309,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }));
 
     if (deletedSourceEntries.length > 0) {
-      await supabase.from('deleted_matches').upsert(deletedSourceEntries as any).select();
+      await supabase.from('deleted_matches').upsert(deletedSourceEntries).select();
     }
     
     const { error } = await supabase.from('matches').delete().in('id', matchIdsToDelete);
@@ -307,7 +325,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const bulkUpdateMatchStatus = async (matchIdsToUpdate: string[], status: MatchStatus) => {
     const originalMatches = matches;
     setMatches(prev => processMatchArrays(prev.map(m => matchIdsToUpdate.includes(m.id) ? { ...m, status } : m)));
-    const { error } = await supabase.from('matches').update({ status: status } as any).in('id', matchIdsToUpdate);
+    const { error } = await supabase.from('matches').update({ status: status }).in('id', matchIdsToUpdate);
     if (error) {
       console.error("Error bulk updating status:", error);
       setError(`Failed to bulk update status: ${error.message}`);
@@ -318,7 +336,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const bulkClearStreamLinks = async (matchIdsToClear: string[]) => {
     const originalMatches = matches;
     setMatches(prev => processMatchArrays(prev.map(m => matchIdsToClear.includes(m.id) ? { ...m, streamLinks: [] } : m)));
-    const { error } = await supabase.from('matches').update({ streamLinks: [] } as any).in('id', matchIdsToClear);
+    const { error } = await supabase.from('matches').update({ streamLinks: [] }).in('id', matchIdsToClear);
     if (error) {
       console.error("Error bulk clearing streams:", error);
       setError(`Failed to clear streams: ${error.message}`);
@@ -363,7 +381,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (newMatches.length > 0) {
             const matchesToInsert = newMatches.map(({ isFeatured, ...rest }) => rest);
-            const { error: insertError } = await supabase.from('matches').insert(matchesToInsert as any);
+            const matchesToInsertDb: Database['public']['Tables']['matches']['Insert'][] = matchesToInsert.map(m => ({
+                ...m,
+                streamLinks: m.streamLinks as Json,
+                team1: m.team1 as Json,
+                team2: m.team2 as Json,
+            }));
+            const { error: insertError } = await supabase.from('matches').insert(matchesToInsertDb);
             if (insertError) throw insertError;
             setMatches(prev => processMatchArrays([...prev, ...newMatches]));
         }
@@ -413,7 +437,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             
             if (matchesToAdd.length > 0) {
                 const dbMatches = matchesToAdd.map(({isFeatured, ...rest}) => rest);
-                const { error: insertError } = await supabase.from('matches').insert(dbMatches as any);
+                const dbMatchesToInsert: Database['public']['Tables']['matches']['Insert'][] = dbMatches.map(m => ({
+                    ...m,
+                    streamLinks: m.streamLinks as Json,
+                    team1: m.team1 as Json,
+                    team2: m.team2 as Json,
+                }));
+                const { error: insertError } = await supabase.from('matches').insert(dbMatchesToInsert);
                 if (!insertError) {
                     addedCount += matchesToAdd.length;
                     setMatches(prev => processMatchArrays([...prev, ...matchesToAdd]));
