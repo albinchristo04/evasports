@@ -13,8 +13,9 @@
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.2",
     "uuid": "^11.1.0",
+      "@google/genai",
     "@supabase/supabase-js": "^2"
-  },
+   },
   "devDependencies": {
     "@types/node": "^22.14.0",
     "typescript": "~5.7.2",
