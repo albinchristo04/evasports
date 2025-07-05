@@ -1,6 +1,10 @@
-import type { AdminSettings, StreamLink, Team } from './types';
-
-export type Json = any;
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
 
 export interface Database {
   public: {
@@ -34,9 +38,9 @@ export interface Database {
           sourceMatchId: string | null
           sourceUrl: string | null
           status: string
-          streamLinks: StreamLink[]
-          team1: Team
-          team2: Team
+          streamLinks: Json
+          team1: Json
+          team2: Json
           time: string | null
         }
         Insert: {
@@ -50,9 +54,9 @@ export interface Database {
           sourceMatchId?: string | null
           sourceUrl?: string | null
           status: string
-          streamLinks: StreamLink[]
-          team1: Team
-          team2: Team
+          streamLinks: Json
+          team1: Json
+          team2: Json
           time?: string | null
         }
         Update: {
@@ -66,26 +70,26 @@ export interface Database {
           sourceMatchId?: string | null
           sourceUrl?: string | null
           status?: string
-          streamLinks?: StreamLink[]
-          team1?: Team
-          team2?: Team
+          streamLinks?: Json
+          team1?: Json
+          team2?: Json
           time?: string | null
         }
       }
       settings: {
         Row: {
           id: number
-          settings_data: AdminSettings
+          settings_data: Json
           updated_at: string | null
         }
         Insert: {
           id: number
-          settings_data: AdminSettings
+          settings_data: Json
           updated_at?: string | null
         }
         Update: {
           id?: number
-          settings_data?: AdminSettings
+          settings_data?: Json
           updated_at?: string | null
         }
       }

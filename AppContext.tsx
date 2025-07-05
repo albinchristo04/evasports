@@ -6,7 +6,7 @@ import { AuthError } from '@supabase/supabase-js';
 import useLocalStorage from './hooks/useLocalStorage';
 import { INITIAL_ADMIN_SETTINGS } from './constants';
 import { parseMatchesFromJson, generateId } from './utils/helpers';
-import { normalizeNameForKey, guessLogoUrl, searchTeamLogoOnline } from './utils/logoService'; 
+import { normalizeNameForKey, guessLogoUrl } from './utils/logoService'; 
 import { supabase } from './utils/supabase';
 
 
@@ -17,7 +17,7 @@ interface AppContextTypeCore {
   updateAdminSettings: (newSettings: Partial<AdminSettings>) => Promise<void>;
   setJsonSources: (updater: React.SetStateAction<JsonSource[]>) => Promise<void>; 
   fetchMatchesFromSource: (source: JsonSource) => Promise<void>;
-  fetchAllMatchesFromSources: (options?: { overwrite?: boolean, isManualTrigger?: boolean }) => Promise<{added: number, skipped: number, error?: string}>;
+  fetchAllMatchesFromSources: (overwrite?: boolean) => Promise<{added: number, skipped: number, error?: string}>;
   loadingSources: { [key: string]: boolean }; 
   globalLoading: boolean;
   error: string | null;
@@ -77,85 +77,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const notifiedStartingSoonRef = useRef<Set<string>>(new Set());
   const notifiedLiveRef = useRef<Set<string>>(new Set());
 
-  const updateAdminSettings = useCallback(async (newSettings: Partial<AdminSettings>) => {
-    const currentState = adminSettings;
-    const updatedSettingsData = {
-        ...currentState,
-        ...newSettings,
-    } as AdminSettings;
-    
-    // Optimistic UI update
-    setAdminSettingsState(updatedSettingsData);
-
-    const { error: dbError } = await supabase
-        .from('settings')
-        .update({ settings_data: updatedSettingsData, updated_at: new Date().toISOString() })
-        .eq('id', 1);
-
-    if (dbError) {
-        console.error("Error updating settings:", dbError);
-        setError(`Failed to save settings: ${dbError.message}`);
-        // Revert optimistic update on failure
-        setAdminSettingsState(currentState);
-    }
-  }, [adminSettings]);
-
-  const addOrUpdateManagedTeam = useCallback(async (teamEntry: ManagedTeam) => {
-    const newManagedTeamsList = [...managedTeams];
-    const existingIndex = newManagedTeamsList.findIndex(mt => mt.nameKey === teamEntry.nameKey);
-
-    if (existingIndex > -1) {
-      newManagedTeamsList[existingIndex] = teamEntry;
-    } else {
-      newManagedTeamsList.push(teamEntry);
-    }
-    await updateAdminSettings({ managedTeams: newManagedTeamsList.sort((a, b) => a.displayName.localeCompare(b.displayName)) });
-  }, [managedTeams, updateAdminSettings]);
-
-  const findAndSetLogosForNewTeams = useCallback(async (newlyAddedMatches: Omit<Match, 'isFeatured'>[]) => {
-      if (newlyAddedMatches.length === 0) return;
-
-      const discoveredTeams = new Map<string, { name: string, league: string }>();
-
-      newlyAddedMatches.forEach(match => {
-          const team1Key = normalizeNameForKey(match.team1.name);
-          if (team1Key && !discoveredTeams.has(team1Key)) {
-              discoveredTeams.set(team1Key, { name: match.team1.name, league: match.leagueName });
-          }
-          const team2Key = normalizeNameForKey(match.team2.name);
-          if (team2Key && !discoveredTeams.has(team2Key)) {
-              discoveredTeams.set(team2Key, { name: match.team2.name, league: match.leagueName });
-          }
-      });
-
-      const teamsToSearch = Array.from(discoveredTeams.keys()).filter(key => 
-          !managedTeams.some(mt => mt.nameKey === key && mt.logoUrl)
-      );
-
-      if (teamsToSearch.length === 0) return;
-      
-      console.log(`Found ${teamsToSearch.length} new teams without logos. Starting background search...`);
-
-      for (const teamKey of teamsToSearch) {
-          const teamInfo = discoveredTeams.get(teamKey);
-          if (teamInfo) {
-              const foundUrl = await searchTeamLogoOnline(teamInfo.name, teamInfo.league);
-              if (foundUrl) {
-                  const newManagedTeam: ManagedTeam = {
-                      nameKey: teamKey,
-                      displayName: teamInfo.name,
-                      logoUrl: foundUrl,
-                      leagueContext: teamInfo.league,
-                      lastUpdated: new Date().toISOString(),
-                  };
-                  await addOrUpdateManagedTeam(newManagedTeam);
-              }
-          }
-      }
-      console.log("Finished background logo search for new teams.");
-  }, [managedTeams, addOrUpdateManagedTeam]);
-
-
   // Initial data loading from Supabase
   useEffect(() => {
     const loadInitialDataAndSession = async () => {
@@ -171,8 +92,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSession(session);
       setUser(session?.user ?? null);
       
-      // 2. Fetch settings and prepare them for use
-      let effectiveSettings = { ...INITIAL_ADMIN_SETTINGS };
+      // 2. Fetch settings
       const { data: settingsData, error: settingsError } = await supabase
         .from('settings')
         .select('settings_data')
@@ -184,16 +104,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setError(`Error fetching settings: ${settingsError.message}`);
       } else if (settingsData) {
         const dbSettings = settingsData.settings_data as Partial<AdminSettings>;
-        effectiveSettings = { ...effectiveSettings, ...dbSettings };
+        setAdminSettingsState(prev => ({...prev, ...dbSettings}));
       } else { // No settings found, insert initial settings
-        const { error: upsertError } = await supabase.from('settings').upsert({ id: 1, settings_data: INITIAL_ADMIN_SETTINGS });
+        const { error: upsertError } = await supabase.from('settings').upsert({ id: 1, settings_data: INITIAL_ADMIN_SETTINGS as unknown as Json });
         if(upsertError) {
             console.error("Error saving initial settings:", upsertError);
             setError(`Error saving initial settings: ${upsertError.message}`);
         }
       }
-      // Set the state with the determined settings
-      setAdminSettingsState(effectiveSettings);
 
       // 3. Fetch matches
       const { data: matchesData, error: matchesError } = await supabase
@@ -205,12 +123,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.error("Error fetching matches:", matchesError);
         setError(`Error fetching matches: ${matchesError.message}`);
       } else if (matchesData) {
-        // Use `effectiveSettings` to process matches immediately
-        const processedMatches = (matchesData as Match[]).map(m => ({
-            ...m,
-            isFeatured: effectiveSettings.featuredMatchIds.includes(m.id),
-        })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        setMatches(processedMatches);
+        setMatches(matchesData as Match[]);
       }
       
       // 4. Finish loading
@@ -240,6 +153,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   };
+
+
+  const updateAdminSettings = useCallback(async (newSettings: Partial<AdminSettings>) => {
+    const currentState = adminSettings;
+    const updatedSettingsData = {
+        ...currentState,
+        ...newSettings,
+    } as AdminSettings;
+    
+    // Optimistic UI update
+    setAdminSettingsState(updatedSettingsData);
+
+    const { error: dbError } = await supabase
+        .from('settings')
+        .update({ settings_data: updatedSettingsData as unknown as Json, updated_at: new Date().toISOString() })
+        .eq('id', 1);
+
+    if (dbError) {
+        console.error("Error updating settings:", dbError);
+        setError(`Failed to save settings: ${dbError.message}`);
+        // Revert optimistic update on failure
+        setAdminSettingsState(currentState);
+    }
+  }, [adminSettings]);
 
   const setJsonSources = useCallback(async (updater: React.SetStateAction<JsonSource[]>) => {
     const newSources = typeof updater === 'function' ? updater(adminSettings.jsonSources) : updater;
@@ -274,6 +211,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     return { ...team, logoUrl: logoUrl || undefined }; 
   }, [getManagedTeamLogo]);
+
+  const addOrUpdateManagedTeam = useCallback(async (teamEntry: ManagedTeam) => {
+    const newManagedTeamsList = [...managedTeams];
+    const existingIndex = newManagedTeamsList.findIndex(mt => mt.nameKey === teamEntry.nameKey);
+
+    if (existingIndex > -1) {
+      newManagedTeamsList[existingIndex] = teamEntry;
+    } else {
+      newManagedTeamsList.push(teamEntry);
+    }
+    await updateAdminSettings({ managedTeams: newManagedTeamsList.sort((a, b) => a.displayName.localeCompare(b.displayName)) });
+  }, [managedTeams, updateAdminSettings]);
 
   const deleteManagedTeam = useCallback(async (teamNameKey: string) => {
     const newManagedTeams = managedTeams.filter(mt => mt.nameKey !== teamNameKey);
@@ -310,7 +259,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     
     const { isFeatured, ...matchToInsert } = newMatch;
 
-    const { error } = await supabase.from('matches').insert(matchToInsert);
+    const { error } = await supabase.from('matches').insert(matchToInsert as unknown as Database['public']['Tables']['matches']['Insert']);
     if (error) {
         console.error("Error adding match:", error);
         setError(`Failed to add match: ${error.message}`);
@@ -327,7 +276,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // isFeatured is not a db column, so we should not try to update it.
     const { isFeatured, ...matchToUpdate } = updatedMatch;
 
-    const { error } = await supabase.from('matches').update(matchToUpdate).eq('id', updatedMatch.id);
+    const { error } = await supabase.from('matches').update(matchToUpdate as unknown as Database['public']['Tables']['matches']['Update']).eq('id', updatedMatch.id);
     if (error) {
         console.error("Error updating match:", error);
         setError(`Failed to update match: ${error.message}`);
@@ -351,7 +300,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // If the match came from a source, add it to the deleted list to prevent re-import
     if (matchToDelete.sourceMatchId && matchToDelete.sourceUrl) {
       // Use upsert to handle cases where it might already be marked as deleted.
-      const deletedEntry = {
+      const deletedEntry: Database['public']['Tables']['deleted_matches']['Insert'] = {
         sourceMatchId: matchToDelete.sourceMatchId,
         sourceUrl: matchToDelete.sourceUrl,
         deleted_at: new Date().toISOString()
@@ -413,7 +362,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const bulkClearStreamLinks = async (matchIdsToClear: string[]) => {
     const originalMatches = matches;
     setMatches(prev => processMatchArrays(prev.map(m => matchIdsToClear.includes(m.id) ? { ...m, streamLinks: [] } : m)));
-    const { error } = await supabase.from('matches').update({ streamLinks: [] }).in('id', matchIdsToClear);
+    const { error } = await supabase.from('matches').update({ streamLinks: [] as unknown as Json }).in('id', matchIdsToClear);
     if (error) {
       console.error("Error bulk clearing streams:", error);
       setError(`Failed to clear streams: ${error.message}`);
@@ -458,13 +407,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (newMatches.length > 0) {
             const matchesToInsert = newMatches;
-            const { error: insertError } = await supabase.from('matches').insert(matchesToInsert);
-            if (insertError) {
-              throw insertError;
-            } else {
-              setMatches(prev => processMatchArrays([...prev, ...newMatches.map(m => ({...m, isFeatured: false}))]));
-              findAndSetLogosForNewTeams(newMatches); // Auto-find logos for new teams
-            }
+            const { error: insertError } = await supabase.from('matches').insert(matchesToInsert as unknown as Database['public']['Tables']['matches']['Insert'][]);
+            if (insertError) throw insertError;
+            setMatches(prev => processMatchArrays([...prev, ...newMatches.map(m => ({...m, isFeatured: false}))]));
         }
 
         await setJsonSources(prevSources => prevSources.map(s => s.id === source.id ? {...s, lastImported: new Date().toISOString()} : s));
@@ -474,21 +419,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } finally {
       setLoadingSources(prev => ({ ...prev, [source.id]: false }));
     }
-  }, [setJsonSources, processMatchArrays, findAndSetLogosForNewTeams]); 
+  }, [setJsonSources, processMatchArrays]); 
   
-  const fetchAllMatchesFromSources = useCallback(async (options?: { overwrite?: boolean, isManualTrigger?: boolean }) => {
-    const { overwrite = false, isManualTrigger = false } = options || {};
-
-    if (!isManualTrigger) {
-      console.warn("fetchAllMatchesFromSources called without a manual trigger. Aborting to prevent unwanted auto-import.");
-      return { added: 0, skipped: 0, error: "Automatic import is disabled." };
-    }
-
+  const fetchAllMatchesFromSources = useCallback(async (overwrite: boolean = false) => {
     setGlobalLoading(true);
     setError(null);
     let addedCount = 0;
     let skippedCount = 0;
-    const allNewlyAddedMatches: Omit<Match, 'isFeatured'>[] = [];
 
     if(overwrite) {
         const sourceUrls = jsonSources.map(s => s.url);
@@ -520,10 +457,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             
             if (matchesToAdd.length > 0) {
                 const dbMatches = matchesToAdd;
-                const { error: insertError } = await supabase.from('matches').insert(dbMatches);
+                const { error: insertError } = await supabase.from('matches').insert(dbMatches as unknown as Database['public']['Tables']['matches']['Insert'][]);
                 if (!insertError) {
                     addedCount += matchesToAdd.length;
-                    allNewlyAddedMatches.push(...matchesToAdd);
+                    setMatches(prev => processMatchArrays([...prev, ...matchesToAdd.map(m => ({...m, isFeatured: false}))]));
                     matchesToAdd.forEach(m => existingSourceMatches.add(`${m.sourceUrl}::${m.sourceMatchId}`));
                 }
             }
@@ -532,14 +469,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch(e) { /* ignore single source error */ }
     }
     
-    if (allNewlyAddedMatches.length > 0) {
-        setMatches(prev => processMatchArrays([...prev, ...allNewlyAddedMatches.map(m => ({...m, isFeatured: false}))]));
-        findAndSetLogosForNewTeams(allNewlyAddedMatches); // Auto-find logos for all new teams from all sources
-    }
-
     setGlobalLoading(false);
     return { added: addedCount, skipped: skippedCount };
-  }, [jsonSources, processMatchArrays, setJsonSources, findAndSetLogosForNewTeams]);
+  }, [jsonSources, processMatchArrays, setJsonSources]);
 
   // Ad Management Functions
   const getAdSlot = useCallback((locationKey: AdLocationKey): AdSlot | undefined => {

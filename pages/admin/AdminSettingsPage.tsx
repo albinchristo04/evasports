@@ -95,8 +95,8 @@ const AdminSettingsPage: React.FC = () => {
   const handleFetchAll = async () => {
       if (!window.confirm("This will fetch matches from all enabled sources. It may add many new matches. Are you sure?")) return;
       setIsFetchingAll(true);
-      const result = await fetchAllMatchesFromSources({ isManualTrigger: true });
-      if (result.error && result.error !== "Automatic import is disabled.") {
+      const result = await fetchAllMatchesFromSources();
+      if (result.error) {
           showFeedback(`Error during fetch: ${result.error}`, 'error');
       } else {
           showFeedback(`Fetch complete! Added: ${result.added}, Skipped: ${result.skipped}.`, 'success');

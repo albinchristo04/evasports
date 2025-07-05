@@ -87,7 +87,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const dbSettings = settingsData.settings_data as Partial<AdminSettings>;
         setAdminSettingsState(prev => ({...prev, ...dbSettings}));
       } else { // No settings found, insert initial settings
-        const { error: upsertError } = await supabase.from('settings').upsert({ id: 1, settings_data: INITIAL_ADMIN_SETTINGS });
+        const { error: upsertError } = await supabase.from('settings').upsert({ id: 1, settings_data: INITIAL_ADMIN_SETTINGS as unknown as Json });
         if(upsertError) {
             console.error("Error saving initial settings:", upsertError);
             setError(`Error saving initial settings: ${upsertError.message}`);
@@ -124,7 +124,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const { error: dbError } = await supabase
         .from('settings')
-        .update({ settings_data: updatedSettingsData, updated_at: new Date().toISOString() })
+        .update({ settings_data: updatedSettingsData as unknown as Json, updated_at: new Date().toISOString() })
         .eq('id', 1);
 
     if (dbError) {
@@ -216,7 +216,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     
     const { isFeatured, ...matchToInsert } = newMatch;
 
-    const { error } = await supabase.from('matches').insert(matchToInsert);
+    const { error } = await supabase.from('matches').insert(matchToInsert as unknown as Database['public']['Tables']['matches']['Insert']);
     if (error) {
         console.error("Error adding match:", error);
         setError(`Failed to add match: ${error.message}`);
@@ -233,7 +233,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // isFeatured is not a db column, so we should not try to update it.
     const { isFeatured, ...matchToUpdate } = updatedMatch;
 
-    const { error } = await supabase.from('matches').update(matchToUpdate).eq('id', updatedMatch.id);
+    const { error } = await supabase.from('matches').update(matchToUpdate as unknown as Database['public']['Tables']['matches']['Update']).eq('id', updatedMatch.id);
     if (error) {
         console.error("Error updating match:", error);
         setError(`Failed to update match: ${error.message}`);
@@ -319,7 +319,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const bulkClearStreamLinks = async (matchIdsToClear: string[]) => {
     const originalMatches = matches;
     setMatches(prev => processMatchArrays(prev.map(m => matchIdsToClear.includes(m.id) ? { ...m, streamLinks: [] } : m)));
-    const { error } = await supabase.from('matches').update({ streamLinks: [] }).in('id', matchIdsToClear);
+    const { error } = await supabase.from('matches').update({ streamLinks: [] as unknown as Json }).in('id', matchIdsToClear);
     if (error) {
       console.error("Error bulk clearing streams:", error);
       setError(`Failed to clear streams: ${error.message}`);
@@ -364,7 +364,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (newMatches.length > 0) {
             const matchesToInsert = newMatches;
-            const { error: insertError } = await supabase.from('matches').insert(matchesToInsert);
+            const { error: insertError } = await supabase.from('matches').insert(matchesToInsert as unknown as Database['public']['Tables']['matches']['Insert'][]);
             if (insertError) throw insertError;
             setMatches(prev => processMatchArrays([...prev, ...newMatches.map(m => ({...m, isFeatured: false}))]));
         }
@@ -414,7 +414,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             
             if (matchesToAdd.length > 0) {
                 const dbMatches = matchesToAdd;
-                const { error: insertError } = await supabase.from('matches').insert(dbMatches);
+                const { error: insertError } = await supabase.from('matches').insert(dbMatches as unknown as Database['public']['Tables']['matches']['Insert'][]);
                 if (!insertError) {
                     addedCount += matchesToAdd.length;
                     setMatches(prev => processMatchArrays([...prev, ...matchesToAdd.map(m => ({...m, isFeatured: false}))]));

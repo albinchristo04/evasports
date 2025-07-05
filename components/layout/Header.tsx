@@ -18,14 +18,24 @@ const Header: React.FC = () => {
             )}
             <span>{adminSettings.siteName}</span>
           </Link>
-          <NavLink 
-            to="/" 
-            className={({ isActive }) => 
-              `text-lg font-medium hover:text-[var(--theme-accent)] transition-colors ${isActive ? 'text-[var(--theme-accent)]' : 'text-neutral-text'}`
-            }
-          >
-            Home
-          </NavLink>
+          <nav className="flex space-x-6 items-center">
+            <NavLink 
+              to="/" 
+              className={({ isActive }) => 
+                `text-lg font-medium hover:text-[var(--theme-accent)] transition-colors ${isActive ? 'text-[var(--theme-accent)]' : 'text-neutral-text'}`
+              }
+            >
+              Home
+            </NavLink>
+            <NavLink 
+              to="/admin" 
+              className={({ isActive }) => 
+                `text-lg font-medium hover:text-[var(--theme-accent)] transition-colors ${isActive ? 'text-[var(--theme-accent)]' : 'text-neutral-text'}`
+               }
+            >
+              Admin Panel
+            </NavLink>
+          </nav>
         </div>
       </div>
     </header>
