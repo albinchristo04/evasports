@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { useAppContext } from '../../AppContext';
 import { JsonSource, PreviewMatch, RawMatchData, MatchStatus } from '../../types';
@@ -93,6 +94,7 @@ const AdminImportInteractivePage: React.FC = () => {
 
       const previewMatchesWithStatus = parsedPotentialMatches.map((m): PreviewMatch => ({
         ...m,
+        isFeatured: false,
         isAlreadyImported: existingSourceMatchIds.has(m.sourceMatchId!),
         isPermanentlyDeleted: deletedSourceMatchIds.has(m.sourceMatchId!)
       }));
@@ -135,7 +137,7 @@ const AdminImportInteractivePage: React.FC = () => {
     for(const matchFromPreview of matchesToAdd) {
         if (!matchFromPreview.isAlreadyImported && !matchFromPreview.isPermanentlyDeleted) {
             const { id, isAlreadyImported, isPermanentlyDeleted, ...matchDataToAdd } = matchFromPreview;
-            await addMatch(matchDataToAdd); // <-- This is correct, as it omits id
+            await addMatch(matchDataToAdd);
             addedCount++;
         } else {
             skippedCount++;

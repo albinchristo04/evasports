@@ -10,12 +10,14 @@ import AdminMatchesPage from './pages/admin/AdminMatchesPage';
 import AdminSettingsPage from './pages/admin/AdminSettingsPage';
 import AdminMatchFormPage from './pages/admin/AdminMatchFormPage';
 import AdminTeamsPage from './pages/admin/AdminTeamsPage'; 
-import AdminImportInteractivePage from './pages/admin/AdminImportInteractivePage'; // New Import
+import AdminImportInteractivePage from './pages/admin/AdminImportInteractivePage';
+import LoginPage from './pages/LoginPage';
 
 const App: React.FC = () => {
   return (
     <HashRouter>
       <Routes>
+        <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<MainLayout />}>
           <Route index element={<HomePage />} />
           <Route path="match/:matchId" element={<MatchDetailPage />} />
@@ -27,7 +29,7 @@ const App: React.FC = () => {
           <Route path="matches/new" element={<AdminMatchFormPage />} />
           <Route path="matches/edit/:matchId" element={<AdminMatchFormPage />} />
           <Route path="teams" element={<AdminTeamsPage />} />
-          <Route path="import" element={<AdminImportInteractivePage />} /> {/* New Route */}
+          <Route path="import" element={<AdminImportInteractivePage />} />
           <Route path="settings" element={<AdminSettingsPage />} />
         </Route>
       </Routes>

@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { useAppContext } from '../AppContext';
 import MatchList from '../components/matches/MatchList';
@@ -15,19 +16,15 @@ const HomePage: React.FC = () => {
   const featuredMatches = useMemo(() => {
     return matches
       .filter(match => match.isFeatured)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // Optional: sort featured matches
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // Sort newest first
   }, [matches]);
 
   const regularMatches = useMemo(() => {
     return matches
+      .filter(match => !match.isFeatured)
       .filter(match => selectedLeague ? match.leagueName === selectedLeague : true)
       .filter(match => selectedStatus ? match.status === selectedStatus : true)
-      .sort((a, b) => {
-         // Sort featured matches to the top within the filtered list if they aren't separated
-         if(a.isFeatured && !b.isFeatured) return -1;
-         if(!a.isFeatured && b.isFeatured) return 1;
-         return new Date(a.date).getTime() - new Date(b.date).getTime()
-      });
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [matches, selectedLeague, selectedStatus]);
 
   const leagueOptions = [{ value: '', label: 'All Leagues' }, ...leagues.map(l => ({ value: l, label: l }))];

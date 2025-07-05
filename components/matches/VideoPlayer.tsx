@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef } from 'react';
 import { StreamType } from '../../types';
 // Import Hls.js if you want to support HLS streams
@@ -52,8 +51,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ streamUrl, streamType }) => {
           src={streamUrl}
           title="Match Stream"
           className="aspect-video w-full rounded-lg shadow-xl"
-          allow="autoplay; encrypted-media"
-          allowFullScreen
+          allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
         ></iframe>
       );
     case StreamType.VIDEO:
@@ -97,4 +95,3 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ streamUrl, streamType }) => {
 };
 
 export default VideoPlayer;
-    

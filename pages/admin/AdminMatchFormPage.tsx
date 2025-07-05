@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../../AppContext';
@@ -28,33 +29,23 @@ const StreamLinkModal: React.FC<StreamLinkModalProps> = ({ isOpen, onClose, onSa
   );
 
   useEffect(() => {
-    if (initialStreamLink) {
-      setCurrentLink(initialStreamLink);
-    } else {
-      setCurrentLink({
-        id: generateId(),
+    setCurrentLink(
+      initialStreamLink || {
+        id: initialStreamLink?.id || generateId(), // keep id if editing
         url: '',
         qualityLabel: 'Main',
         type: StreamType.NONE,
         status: StreamLinkStatus.UNKNOWN,
-      });
-    }
+      }
+    );
   }, [initialStreamLink, isOpen]);
+
 
   if (!isOpen) return null;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setCurrentLink(prev => {
-      // Convert select values back to enum types
-      if (name === "type") {
-        return { ...prev, type: value as StreamType };
-      }
-      if (name === "status") {
-        return { ...prev, status: value as StreamLinkStatus };
-      }
-      return { ...prev, [name]: value };
-    });
+    setCurrentLink(prev => ({ ...prev, [name]: value }));
   };
 
   const handleSave = () => {
@@ -94,7 +85,7 @@ const AdminMatchFormPage: React.FC = () => {
 
   const isEditing = Boolean(matchId);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [matchData, setMatchData] = useState<Omit<Match, 'id' | 'sourceMatchId' | 'sourceUrl'>>({
+  const [matchData, setMatchData] = useState<Partial<Match>>({
     leagueName: '',
     date: new Date().toISOString().split('T')[0], 
     time: '12:00',
@@ -143,14 +134,12 @@ const AdminMatchFormPage: React.FC = () => {
       setMatchData(prev => ({ ...prev, isFeatured: checked }));
     } else if (name.startsWith('team1.')) {
       const teamField = name.split('.')[1] as keyof Team;
-      setMatchData(prev => ({ ...prev, team1: { ...prev.team1, [teamField]: value } }));
+      setMatchData(prev => ({ ...prev, team1: { ...(prev.team1 || { name: '' }), [teamField]: value } as Team }));
     } else if (name.startsWith('team2.')) {
       const teamField = name.split('.')[1] as keyof Team;
-      setMatchData(prev => ({ ...prev, team2: { ...prev.team2, [teamField]: value } }));
+      setMatchData(prev => ({ ...prev, team2: { ...(prev.team2 || { name: '' }), [teamField]: value } as Team }));
     } else if (name === 'score1' || name === 'score2') {
-      setMatchData(prev => ({ ...prev, [name]: value === '' ? null : parseInt(value, 10) }));
-    } else if (name === 'status') {
-      setMatchData(prev => ({ ...prev, status: value as MatchStatus }));
+        setMatchData(prev => ({ ...prev, [name]: value === '' ? null : parseInt(value, 10) }));
     } else {
       setMatchData(prev => ({ ...prev, [name]: value }));
     }
@@ -158,13 +147,14 @@ const AdminMatchFormPage: React.FC = () => {
 
   const handleSaveStreamLink = (streamLink: StreamLink) => {
     setMatchData(prev => {
-      const existingIndex = prev.streamLinks.findIndex(sl => sl.id === streamLink.id);
+      const existingLinks = prev.streamLinks || [];
+      const existingIndex = existingLinks.findIndex(sl => sl.id === streamLink.id);
       let newStreamLinks;
       if (existingIndex > -1) {
-        newStreamLinks = [...prev.streamLinks];
+        newStreamLinks = [...existingLinks];
         newStreamLinks[existingIndex] = streamLink;
       } else {
-        newStreamLinks = [...prev.streamLinks, streamLink];
+        newStreamLinks = [...existingLinks, streamLink];
       }
       return { ...prev, streamLinks: newStreamLinks };
     });
@@ -174,7 +164,7 @@ const AdminMatchFormPage: React.FC = () => {
     if (window.confirm('Are you sure you want to delete this stream link?')) {
         setMatchData(prev => ({
             ...prev,
-            streamLinks: prev.streamLinks.filter(sl => sl.id !== linkId)
+            streamLinks: (prev.streamLinks || []).filter(sl => sl.id !== linkId)
         }));
     }
   };
@@ -192,26 +182,46 @@ const AdminMatchFormPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!matchData.team1?.name || !matchData.team2?.name || !matchData.leagueName || !matchData.date) {
+        alert('Please fill in all required fields (League, Date, Team Names).');
+        return;
+    }
+
     setIsSubmitting(true);
     const fullDateISO = new Date(`${matchData.date}T${matchData.time || '00:00:00'}`).toISOString();
     
-    const finalMatchDataForSave = {
-        ...matchData,
-        date: fullDateISO,
-        score1: matchData.score1 === null ? undefined : matchData.score1,
-        score2: matchData.score2 === null ? undefined : matchData.score2,
-    };
-
     try {
         if (isEditing && matchId) {
-          await updateMatch({ ...finalMatchDataForSave, id: matchId } as Match);
+          const matchToUpdate: Match = {
+            ...matchData,
+            id: matchId,
+            date: fullDateISO,
+            leagueName: matchData.leagueName as string,
+            team1: matchData.team1 as Team,
+            team2: matchData.team2 as Team,
+            status: matchData.status || MatchStatus.UPCOMING,
+            streamLinks: matchData.streamLinks || [],
+            isFeatured: !!matchData.isFeatured
+          };
+          await updateMatch(matchToUpdate);
         } else {
-          await addMatch(finalMatchDataForSave as Omit<Match, 'id'>);
+          const matchToAdd: Omit<Match, 'id'> = {
+            ...matchData,
+            date: fullDateISO,
+            leagueName: matchData.leagueName as string,
+            team1: matchData.team1 as Team,
+            team2: matchData.team2 as Team,
+            status: matchData.status || MatchStatus.UPCOMING,
+            streamLinks: matchData.streamLinks || [],
+            isFeatured: !!matchData.isFeatured,
+          };
+          await addMatch(matchToAdd);
         }
         navigate('/admin/matches');
     } catch (error) {
         console.error("Failed to save match", error);
-        // You might want to show an error message to the user here
+        alert(`Error: Could not save the match. Check console for details.`);
     } finally {
         setIsSubmitting(false);
     }
@@ -226,7 +236,7 @@ const AdminMatchFormPage: React.FC = () => {
       <form onSubmit={handleSubmit} className="bg-gray-800 p-8 rounded-xl shadow-2xl space-y-6">
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-          <Input label="League Name" name="leagueName" value={matchData.leagueName} onChange={handleChange} placeholder="e.g., Premier League" required list="leagueSuggestions" />
+          <Input label="League Name" name="leagueName" value={matchData.leagueName || ''} onChange={handleChange} placeholder="e.g., Premier League" required list="leagueSuggestions" />
           <datalist id="leagueSuggestions">
             {leagueOptions.map(opt => <option key={opt.value} value={opt.value} />)}
           </datalist>
@@ -234,7 +244,7 @@ const AdminMatchFormPage: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-          <Input label="Date" name="date" type="date" value={matchData.date} onChange={handleChange} required />
+          <Input label="Date" name="date" type="date" value={matchData.date ? matchData.date.split('T')[0] : ''} onChange={handleChange} required />
           <Input label="Time (HH:MM)" name="time" type="time" value={matchData.time || ''} onChange={handleChange} />
         </div>
          <div className="flex items-center space-x-2 pt-2">
@@ -254,19 +264,19 @@ const AdminMatchFormPage: React.FC = () => {
         <h2 className="text-xl font-semibold text-gray-300 pt-4 border-t border-gray-700">Team Information</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-                <Input label="Team 1 Name" name="team1.name" value={matchData.team1.name} onChange={handleChange} placeholder="Home Team" required />
-                <Input label="Team 1 Logo URL (Optional)" name="team1.logoUrl" value={matchData.team1.logoUrl || ''} onChange={handleChange} placeholder="https://example.com/logo1.png" className="mt-2"/>
+                <Input label="Team 1 Name" name="team1.name" value={matchData.team1?.name || ''} onChange={handleChange} placeholder="Home Team" required />
+                <Input label="Team 1 Logo URL (Optional)" name="team1.logoUrl" value={matchData.team1?.logoUrl || ''} onChange={handleChange} placeholder="https://example.com/logo1.png" className="mt-2"/>
             </div>
             <div>
-                <Input label="Team 2 Name" name="team2.name" value={matchData.team2.name} onChange={handleChange} placeholder="Away Team" required />
-                <Input label="Team 2 Logo URL (Optional)" name="team2.logoUrl" value={matchData.team2.logoUrl || ''} onChange={handleChange} placeholder="https://example.com/logo2.png" className="mt-2"/>
+                <Input label="Team 2 Name" name="team2.name" value={matchData.team2?.name || ''} onChange={handleChange} placeholder="Away Team" required />
+                <Input label="Team 2 Logo URL (Optional)" name="team2.logoUrl" value={matchData.team2?.logoUrl || ''} onChange={handleChange} placeholder="https://example.com/logo2.png" className="mt-2"/>
             </div>
         </div>
 
         <h2 className="text-xl font-semibold text-gray-300 pt-4 border-t border-gray-700">Score & Details</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Input label="Team 1 Score" name="score1" type="number" value={matchData.score1 === null ? '' : String(matchData.score1)} onChange={handleChange} placeholder="-" />
-          <Input label="Team 2 Score" name="score2" type="number" value={matchData.score2 === null ? '' : String(matchData.score2)} onChange={handleChange} placeholder="-" />
+          <Input label="Team 1 Score" name="score1" type="number" value={matchData.score1 === null || matchData.score1 === undefined ? '' : String(matchData.score1)} onChange={handleChange} placeholder="-" />
+          <Input label="Team 2 Score" name="score2" type="number" value={matchData.score2 === null || matchData.score2 === undefined ? '' : String(matchData.score2)} onChange={handleChange} placeholder="-" />
         </div>
          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Input label="Round (Optional)" name="round" value={matchData.round || ''} onChange={handleChange} placeholder="e.g., Final, Semi-final, Group Stage" />
@@ -275,7 +285,7 @@ const AdminMatchFormPage: React.FC = () => {
 
         <h2 className="text-xl font-semibold text-gray-300 pt-4 border-t border-gray-700">Stream Links</h2>
         <div className="space-y-3">
-            {matchData.streamLinks.map(link => (
+            {(matchData.streamLinks || []).map(link => (
                 <div key={link.id} className="bg-gray-700 p-3 rounded-md flex justify-between items-center">
                     <div>
                         <p className="font-medium text-neutral-text">{link.qualityLabel} <span className="text-xs text-gray-400">({link.type}, {link.status})</span></p>
@@ -287,7 +297,7 @@ const AdminMatchFormPage: React.FC = () => {
                     </div>
                 </div>
             ))}
-            {matchData.streamLinks.length === 0 && <p className="text-gray-400 text-sm">No stream links added yet.</p>}
+            {(matchData.streamLinks || []).length === 0 && <p className="text-gray-400 text-sm">No stream links added yet.</p>}
             <Button type="button" variant="ghost" onClick={openStreamLinkModalForAdd} className="mt-2">
                 <PlusCircleIcon className="h-5 w-5 mr-2" /> Add Stream Link
             </Button>

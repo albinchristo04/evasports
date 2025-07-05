@@ -69,7 +69,7 @@ export const transformRawMatch = (
   sourceUrl: string
   // Note: Logo processing (getManagedTeamLogo, guessLogoUrl, addOrUpdateManagedTeam)
   // will be handled by the caller (AppContext) after this initial transformation.
-): Match => {
+): Omit<Match, 'isFeatured'> => {
   const matchId = generateId();
   // Team parsing is basic here; logo assignment is a separate step in AppContext
   const team1 = parseTeam(rawMatch.team1);
@@ -118,6 +118,7 @@ export const transformRawMatch = (
   
   const status = determineMatchStatus(rawMatch, matchDateObject);
   const sourceMatchId = `${leagueName}_${team1.name}_${team2.name}_${rawMatch.date}`.replace(/\s+/g, '_');
+  
 
   return {
     id: matchId,
@@ -137,7 +138,7 @@ export const transformRawMatch = (
   };
 };
 
-export const parseMatchesFromJson = (jsonData: RawMatchData, sourceUrl: string): Match[] => {
+export const parseMatchesFromJson = (jsonData: RawMatchData, sourceUrl: string): Omit<Match, 'isFeatured'>[] => {
   if (!jsonData || !jsonData.matches || !Array.isArray(jsonData.matches)) {
     console.error('Invalid JSON data structure for matches:', jsonData);
     return [];
