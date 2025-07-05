@@ -1,0 +1,6 @@
+{
+  "name": "SportStream Pro",
+  "description": "A web application to track live sports scores, upcoming matches, and manage match streams from various JSON sources.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
