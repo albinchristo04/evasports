@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { useAppContext } from '../AppContext';
 import MatchList from '../components/matches/MatchList';
@@ -48,6 +49,21 @@ const HomePage: React.FC = () => {
 
   return (
     <div className="space-y-8">
+      return (
+  <div className="space-y-8">
+    <div className="text-center text-sm text-white bg-gray-900 p-4 rounded-xl space-x-2">
+      <a href="https://www.streameast100.com/" className="text-blue-400 hover:underline">StreamEast</a> |
+      <a href="https://www.totalsportekpro.com/" className="text-blue-400 hover:underline">TOTALSPORTEK</a> |
+      <a href="https://www.footybite.to/" className="text-blue-400 hover:underline">FOOTYBITE</a> |
+      <a href="https://www.nflbite.to/" className="text-blue-400 hover:underline">NFLBITE</a> |
+      <a href="https://reddit.nbabite.to/" className="text-blue-400 hover:underline">NBABITE</a> |
+      <a href="https://sportsurge100.com/" className="text-blue-400 hover:underline">SPORTSURGE</a> |
+      <a href="https://hesgoalfree.com/" className="text-blue-400 hover:underline">HESGOAL</a> |
+      <a href="https://soccer-1000.com/" className="text-blue-400 hover:underline">SOCCER STREAMS</a> |
+      <a href="https://www.f1streamsfree.com/" className="text-blue-400 hover:underline">F1 STREAMS</a> |
+      <a href="https://hufoot.com/" className="text-blue-400 hover:underline">Hoofoot</a>
+    </div>
+
       {featuredMatches.length > 0 && (
         <div className="bg-gray-800/50 p-6 rounded-xl shadow-xl border border-[var(--theme-accent)]/50">
           <h2 className="text-2xl font-bold text-[var(--theme-accent)] mb-6 text-center flex items-center justify-center">
