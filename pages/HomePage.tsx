@@ -1,10 +1,9 @@
-
 import React, { useState, useMemo } from 'react';
 import { useAppContext } from '../AppContext';
 import MatchList from '../components/matches/MatchList';
 import Spinner from '../components/common/Spinner';
 import Select from '../components/common/Select';
-import { MatchStatus, AdLocationKey, Match } from '../types';
+import { MatchStatus, AdLocationKey } from '../types';
 import AdDisplay from '../components/common/AdDisplay';
 import { StarIcon } from '../components/icons';
 
@@ -12,57 +11,56 @@ const HomePage: React.FC = () => {
   const { matches, globalLoading, error, leagues } = useAppContext();
   const [selectedLeague, setSelectedLeague] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
-  
+
   const featuredMatches = useMemo(() => {
     return matches
-      .filter(match => match.isFeatured)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // Sort newest first
+      .filter((match) => match.isFeatured)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [matches]);
 
   const regularMatches = useMemo(() => {
     return matches
-      .filter(match => selectedLeague ? match.leagueName === selectedLeague : true)
-      .filter(match => selectedStatus ? match.status === selectedStatus : true)
+      .filter((match) => (selectedLeague ? match.leagueName === selectedLeague : true))
+      .filter((match) => (selectedStatus ? match.status === selectedStatus : true))
       .sort((a, b) => {
-         // Sort featured matches to the top within the filtered list if they aren't separated
-         if(a.isFeatured && !b.isFeatured) return -1;
-         if(!a.isFeatured && b.isFeatured) return 1;
-         // Sort by date descending (newest first)
-         return new Date(b.date).getTime() - new Date(a.date).getTime()
+        if (a.isFeatured && !b.isFeatured) return -1;
+        if (!a.isFeatured && b.isFeatured) return 1;
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
       });
   }, [matches, selectedLeague, selectedStatus]);
 
-  const leagueOptions = [{ value: '', label: 'All Leagues' }, ...leagues.map(l => ({ value: l, label: l }))];
+  const leagueOptions = [{ value: '', label: 'All Leagues' }, ...leagues.map((l) => ({ value: l, label: l }))];
   const statusOptions = [
     { value: '', label: 'All Statuses' },
-    ...Object.values(MatchStatus).map(s => ({ value: s, label: s }))
+    ...Object.values(MatchStatus).map((s) => ({ value: s, label: s })),
   ];
 
   if (globalLoading && matches.length === 0) {
     return (
-        <div className="flex flex-col justify-center items-center py-20">
-          <Spinner size="lg" color="text-[var(--theme-accent)]"/>
-          <p className="mt-4 text-lg text-gray-400">Loading matches from database...</p>
-        </div>
-      )
+      <div className="flex flex-col justify-center items-center py-20">
+        <Spinner size="lg" color="text-[var(--theme-accent)]" />
+        <p className="mt-4 text-lg text-gray-400">Loading matches from database...</p>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-8">
-      return (
-  <div className="space-y-8">
-<div className="text-center text-sm text-white bg-gray-900 p-4 rounded-xl space-x-2">
-  <a href="https://www.streameast100.com/" className="text-blue-400 hover:underline">StreamEast</a> |
-  <a href="https://www.totalsportekpro.com/" className="text-blue-400 hover:underline">TOTALSPORTEK</a> |
-  <a href="https://www.footybite.to/" className="text-blue-400 hover:underline">FOOTYBITE</a> |
-  <a href="https://www.nflbite.to/" className="text-blue-400 hover:underline">NFLBITE</a> |
-  <a href="https://reddit.nbabite.to/" className="text-blue-400 hover:underline">NBABITE</a> |
-  <a href="https://sportsurge100.com/" className="text-blue-400 hover:underline">SPORTSURGE</a> |
-  <a href="https://hesgoalfree.com/" className="text-blue-400 hover:underline">HESGOAL</a> |
-  <a href="https://soccer-1000.com/" className="text-blue-400 hover:underline">SOCCER STREAMS</a> |
-  <a href="https://www.f1streamsfree.com/" className="text-blue-400 hover:underline">F1 STREAMS</a> |
-  <a href="https://hufoot.com/" className="text-blue-400 hover:underline">Hoofoot</a>
+      {/* Streaming Links */}
+      <div className="text-center text-sm text-white bg-gray-900 p-4 rounded-xl space-x-2">
+        <a href="https://www.streameast100.com/" className="text-blue-400 hover:underline">StreamEast</a> |
+        <a href="https://www.totalsportekpro.com/" className="text-blue-400 hover:underline">TOTALSPORTEK</a> |
+        <a href="https://www.footybite.to/" className="text-blue-400 hover:underline">FOOTYBITE</a> |
+        <a href="https://www.nflbite.to/" className="text-blue-400 hover:underline">NFLBITE</a> |
+        <a href="https://reddit.nbabite.to/" className="text-blue-400 hover:underline">NBABITE</a> |
+        <a href="https://sportsurge100.com/" className="text-blue-400 hover:underline">SPORTSURGE</a> |
+        <a href="https://hesgoalfree.com/" className="text-blue-400 hover:underline">HESGOAL</a> |
+        <a href="https://soccer-1000.com/" className="text-blue-400 hover:underline">SOCCER STREAMS</a> |
+        <a href="https://www.f1streamsfree.com/" className="text-blue-400 hover:underline">F1 STREAMS</a> |
+        <a href="https://hufoot.com/" className="text-blue-400 hover:underline">Hoofoot</a>
+      </div>
 
+      {/* Featured Matches */}
       {featuredMatches.length > 0 && (
         <div className="bg-gray-800/50 p-6 rounded-xl shadow-xl border border-[var(--theme-accent)]/50">
           <h2 className="text-2xl font-bold text-[var(--theme-accent)] mb-6 text-center flex items-center justify-center">
@@ -72,6 +70,7 @@ const HomePage: React.FC = () => {
         </div>
       )}
 
+      {/* Filters and All Matches */}
       <div className="bg-gray-800 p-6 rounded-xl shadow-xl">
         <h1 className="text-3xl font-bold text-[var(--theme-accent)] mb-6 text-center">
           {featuredMatches.length > 0 ? 'All Matches' : 'Live Scores & Upcoming Matches'}
@@ -94,14 +93,16 @@ const HomePage: React.FC = () => {
             placeholder="All Statuses"
           />
         </div>
-         {error && <p className="text-red-400 text-center mb-4">{error}</p>}
+        {error && <p className="text-red-400 text-center mb-4">{error}</p>}
       </div>
-      
+
       <AdDisplay locationKey={AdLocationKey.HOME_PAGE_BELOW_FILTERS} />
 
       {globalLoading && matches.length > 0 ? (
-          <div className="flex justify-center items-center py-10"><Spinner size="md" /></div>
-      ): (
+        <div className="flex justify-center items-center py-10">
+          <Spinner size="md" />
+        </div>
+      ) : (
         <MatchList matches={regularMatches} />
       )}
     </div>
