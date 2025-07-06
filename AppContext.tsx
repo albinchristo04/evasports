@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Json, Database } from './database.types';
 import { Match, JsonSource, AdminSettings, RawMatchData, PartialAdminSettings, MatchStatus, ManagedTeam, TeamContextType, Team as AppTeam, AdSlot, AdLocationKey, PartialAdSlotsSettings, PartialFeaturedMatchesSettings, AppNotification, StreamLink, Session, User } from './types';
@@ -104,7 +103,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setError(`Error fetching settings: ${settingsError.message}`);
       } else if (settingsData) {
         const dbSettings = settingsData.settings_data as Partial<AdminSettings>;
-        setAdminSettingsState(prev => ({...prev, ...dbSettings}));
+        setAdminSettingsState((prev: AdminSettings) => ({...prev, ...dbSettings}));
       } else { // No settings found, insert initial settings
         const { error: upsertError } = await supabase.from('settings').upsert({ id: 1, settings_data: INITIAL_ADMIN_SETTINGS as unknown as Json });
         if(upsertError) {
@@ -187,13 +186,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const normalizedTeamKey = normalizeNameForKey(teamName);
     const leagueKey = leagueName ? normalizeNameForKey(leagueName) : undefined;
 
-    const found = managedTeams.find(mt => 
+    const found = managedTeams.find((mt: ManagedTeam) => 
         mt.nameKey === normalizedTeamKey && 
         (!leagueKey || !mt.leagueContext || normalizeNameForKey(mt.leagueContext) === leagueKey)
     );
     if (found?.logoUrl) return found.logoUrl;
 
-    const foundByNameOnly = managedTeams.find(mt => mt.nameKey === normalizedTeamKey && mt.logoUrl);
+    const foundByNameOnly = managedTeams.find((mt: ManagedTeam) => mt.nameKey === normalizedTeamKey && mt.logoUrl);
     return foundByNameOnly?.logoUrl;
   }, [managedTeams]);
 
@@ -231,7 +230,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   
   const allDiscoveredTeamNames = React.useMemo(() => {
     const teams = new Map<string, {name: string, league: string}>();
-    matches.forEach(match => {
+    matches.forEach((match: Match) => {
         const key1 = `${normalizeNameForKey(match.team1.name)}_${normalizeNameForKey(match.leagueName)}`;
         if (!teams.has(key1)) teams.set(key1, { name: match.team1.name, league: match.leagueName});
         
@@ -255,7 +254,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addMatch = useCallback(async (matchData: Omit<Match, 'id'>) => {
     const newMatch: Match = { ...matchData, id: generateId() };
-    setMatches(prev => processMatchArrays([newMatch, ...prev])); // Optimistic update
+    setMatches((prev: Match[]) => processMatchArrays([newMatch, ...prev])); // Optimistic update
     
     const { isFeatured, ...matchToInsert } = newMatch;
 
@@ -269,26 +268,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [processMatchArrays, toggleFeaturedMatch]);
 
-  const updateMatch = useCallback(async (updatedMatch: Match) => {
-    const originalMatches = matches;
-    setMatches(prev => processMatchArrays(prev.map(m => m.id === updatedMatch.id ? updatedMatch : m))); // Optimistic update
-    
-    // isFeatured is not a db column, so we should not try to update it.
-    const { isFeatured, ...matchToUpdate } = updatedMatch;
+  const updateMatch = async (updatedMatch: Match) => {
+    // Update in backend (e.g., Supabase)
+    await supabase
+      .from('matches')
+      .update(updatedMatch)
+      .eq('id', updatedMatch.id);
 
-    const { error } = await supabase.from('matches').update(matchToUpdate as unknown as Database['public']['Tables']['matches']['Update']).eq('id', updatedMatch.id);
-    if (error) {
-        console.error("Error updating match:", error);
-        setError(`Failed to update match: ${error.message}`);
-        setMatches(originalMatches); // Revert
-    } else {
-        const isNowFeatured = !!updatedMatch.isFeatured;
-        const wasFeatured = featuredMatchIds.includes(updatedMatch.id);
-        if (isNowFeatured !== wasFeatured) {
-            await toggleFeaturedMatch(updatedMatch.id);
-        }
-    }
-  }, [matches, processMatchArrays, featuredMatchIds, toggleFeaturedMatch]);
+    // Update in local state
+    setMatches(prev =>
+      prev.map(m => m.id === updatedMatch.id ? updatedMatch : m)
+    );
+  };
 
   const deleteMatch = async (matchId: string) => {
     const originalMatches = matches;
