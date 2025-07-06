@@ -269,16 +269,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [processMatchArrays, toggleFeaturedMatch]);
 
   const updateMatch = async (updatedMatch: Match) => {
-    // Update in backend (e.g., Supabase)
+    // Update in backend
     await supabase
       .from('matches')
       .update(updatedMatch)
       .eq('id', updatedMatch.id);
 
-    // Update in local state
-    setMatches(prev =>
-      prev.map(m => m.id === updatedMatch.id ? updatedMatch : m)
-    );
+    // Fetch the latest match from backend
+    const { data: refreshed, error } = await supabase
+      .from('matches')
+      .select('*')
+      .eq('id', updatedMatch.id)
+      .single();
+
+    if (refreshed) {
+      setMatches(prev =>
+        prev.map(m => m.id === updatedMatch.id ? refreshed as Match : m)
+      );
+    }
   };
 
   const deleteMatch = async (matchId: string) => {
